@@ -13,10 +13,18 @@ bytemuck = { version = "1", features = ["derive"] }
 # Logging facade (wgpu reports through it) + RUST_LOG-controlled backend.
 env_logger = "0.11"
 log = "0.4"
+# WGSL parser/validator (already used inside wgpu): readable shader errors
+# with line numbers for hot reload, before anything reaches the GPU.
+naga = { version = "30", features = ["wgsl-in"] }
+# File watching (inotify) for config and shader hot reload.
+notify = "8"
 # Tiny block_on for wgpu's async adapter/device requests.
 pollster = "1"
 # FFT for the spectrum analysis (pure Rust, SIMD-accelerated).
 rustfft = "6.4"
+# Config file: TOML deserialized into typed structs.
+serde = { version = "1", features = ["derive"] }
+toml = "1"
 # GPU rendering. Only the backends that matter on Linux: Vulkan, with GL as fallback.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "vulkan", "gles", "wgsl"] }
 # Window + input; talks to Wayland/X11 via dlopen, so no dev headers needed.

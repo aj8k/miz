@@ -2,7 +2,8 @@
 //! automatically every few minutes unless locked.
 
 use super::{ROTATION, Scene, SceneCtx, SceneInit};
-use crate::gpu::{self, HDR_FORMAT, HdrTarget, Sampling, shaders};
+use crate::gpu::shaders::Shader;
+use crate::gpu::{self, HDR_FORMAT, HdrTarget, Sampling};
 
 /// A crossfade in progress: from `from` to the manager's `current`.
 struct Fade {
@@ -12,6 +13,8 @@ struct Fade {
 
 pub struct SceneManager {
     scenes: Vec<Box<dyn Scene>>,
+    /// Registry name of each scene (to rebuild the same set on reload).
+    keys: Vec<String>,
     current: usize,
     fade: Option<Fade>,
     locked: bool,
@@ -29,6 +32,7 @@ impl SceneManager {
     /// Builds every scene up front (they're cheap) and starts on `start`.
     pub fn new(init: &SceneInit, start: &str) -> anyhow::Result<Self> {
         let mut scenes = Vec::new();
+        let mut keys: Vec<String> = ROTATION.iter().map(|k| k.to_string()).collect();
         for name in ROTATION {
             scenes.push(super::create(name, init)?);
         }
@@ -37,11 +41,12 @@ impl SceneManager {
             // An extra scene (or a typo, which `create` reports) is appended.
             None => {
                 scenes.push(super::create(start, init)?);
+                keys.push(start.to_string());
                 scenes.len() - 1
             }
         };
 
-        let module = shaders::compile(init.device, "crossfade", shaders::CROSSFADE);
+        let module = init.shaders.module(init.device, Shader::Crossfade);
         let crossfade = gpu::fullscreen_pipeline(
             init.device,
             "crossfade",
@@ -57,6 +62,7 @@ impl SceneManager {
         let (slots, slot_groups) = make_slots(init.device, init.sampling, init.size);
         Ok(Self {
             scenes,
+            keys,
             current,
             fade: None,
             locked: false,
@@ -71,6 +77,26 @@ impl SceneManager {
 
     pub fn name(&self) -> &'static str {
         self.scenes[self.current].name()
+    }
+
+    /// Registry name of the current scene (e.g. "nebula").
+    pub fn current_key(&self) -> &str {
+        &self.keys[self.current]
+    }
+
+    /// Rotation interval (0 = never) and crossfade length, in seconds.
+    pub fn set_timing(&mut self, rotate_every_s: f64, fade_s: f64) {
+        self.rotate_every_s = rotate_every_s;
+        self.fade_s = fade_s.max(0.1);
+    }
+
+    /// Takes over lock and timing from the manager this one replaces (shader
+    /// reload). It was built starting on the same scene.
+    pub fn adopt_state(&mut self, old: &SceneManager) {
+        self.locked = old.locked;
+        self.last_switch = old.last_switch;
+        self.rotate_every_s = old.rotate_every_s;
+        self.fade_s = old.fade_s;
     }
 
     pub fn locked(&self) -> bool {
@@ -128,7 +154,8 @@ impl SceneManager {
         {
             self.fade = None;
         }
-        if !self.locked && self.fade.is_none() && time - self.last_switch >= self.rotate_every_s {
+        let rotate = !self.locked && self.rotate_every_s > 0.0 && self.fade.is_none();
+        if rotate && time - self.last_switch >= self.rotate_every_s {
             self.next(time);
         }
         self.progress(time)

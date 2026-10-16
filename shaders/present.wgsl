@@ -7,13 +7,16 @@
 
 @group(1) @binding(0) var scene_tex: texture_2d<f32>;
 @group(1) @binding(1) var scene_smp: sampler;
+@group(2) @binding(0) var<storage, read> lim: Limiter;
 
-// Soft shoulder: identity below `knee`, then a tanh roll-off towards 1.0,
-// so bright spots saturate gracefully instead of clipping hard.
-fn tonemap(c: vec3<f32>) -> vec3<f32> {
-    let knee = 0.6;
+const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
+
+// Soft shoulder: identity below `knee`, then a tanh roll-off towards
+// `ceiling`, so bright spots saturate gracefully instead of clipping hard.
+fn tonemap(c: vec3<f32>, knee: f32, ceiling: f32) -> vec3<f32> {
     let over = max(c - knee, vec3<f32>(0.0));
-    return min(c, vec3<f32>(knee)) + (1.0 - knee) * tanh(over / (1.0 - knee));
+    let room = ceiling - knee;
+    return min(c, vec3<f32>(knee)) + room * tanh(over / room);
 }
 
 fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
@@ -24,8 +27,17 @@ fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let hdr = max(textureSample(scene_tex, scene_smp, in.uv).rgb, vec3<f32>(0.0));
-    var c = linear_to_srgb(clamp(tonemap(hdr), vec3<f32>(0.0), vec3<f32>(1.0)));
+    var hdr = max(textureSample(scene_tex, scene_smp, in.uv).rgb, vec3<f32>(0.0));
+    // Safety limiter (luma.wgsl): keeps the average brightness from
+    // changing faster than the allowed rate.
+    hdr *= lim.exposure;
+    // Calm grading: a little less saturated, a little dimmer, and a lower
+    // brightness ceiling.
+    let calm = g.calm;
+    hdr = mix(vec3<f32>(dot(hdr, LUMA)), hdr, 1.0 - 0.2 * calm);
+    hdr *= 1.0 - 0.15 * calm;
+    let mapped = tonemap(hdr, mix(0.6, 0.5, calm), mix(1.0, 0.85, calm));
+    var c = linear_to_srgb(clamp(mapped, vec3<f32>(0.0), vec3<f32>(1.0)));
     // Triangular-PDF dither (difference of two uniform noises), ±1 LSB.
     let n = hash12(in.pos.xy + f32(g.frame % 64u) * 17.0)
           - hash12(in.pos.yx + f32(g.frame % 64u) * 31.0);

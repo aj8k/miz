@@ -1,11 +1,15 @@
 //! Frame graph: scene -> HDR target -> present (tonemap, sRGB, dither) -> HUD.
 
+mod limiter;
 pub mod params;
 
-use crate::gpu::{self, Gpu, HdrTarget, Sampling, shaders};
+use crate::config::Config;
+use crate::gpu::shaders::{Shader, ShaderLib};
+use crate::gpu::{self, Gpu, HdrTarget, Sampling};
 use crate::scenes::manager::SceneManager;
 use crate::scenes::{SceneCtx, SceneInit};
 use crate::snapshot::{MAX_BANDS, Snapshot, WAVE_LEN};
+use limiter::Limiter;
 use params::{FrameParams, Globals};
 
 /// Audio data on the GPU: bind group 0 for every pipeline.
@@ -45,7 +49,9 @@ impl AudioBuffers {
 
         let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
             binding,
-            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+            visibility: wgpu::ShaderStages::VERTEX
+                | wgpu::ShaderStages::FRAGMENT
+                | wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Buffer {
                 ty,
                 has_dynamic_offset: false,
@@ -96,80 +102,165 @@ impl AudioBuffers {
     }
 }
 
-pub struct Renderer {
-    audio: AudioBuffers,
-    params: FrameParams,
+/// Everything built from shaders. Rebuilt as a unit on shader hot reload,
+/// so a failed reload leaves the previous set fully intact.
+struct Pipelines {
     scenes: SceneManager,
-    scene_target: HdrTarget,
-    /// Internal resolution relative to the window (0.5..1.0).
-    render_scale: f32,
-
-    sampling: Sampling,
-    present_group: wgpu::BindGroup,
-    present_pipeline: wgpu::RenderPipeline,
-    hud_pipeline: wgpu::RenderPipeline,
+    limiter: Limiter,
+    present: wgpu::RenderPipeline,
+    hud: wgpu::RenderPipeline,
 }
 
-impl Renderer {
-    pub fn new(gpu: &Gpu, scene_name: &str) -> anyhow::Result<Self> {
+impl Pipelines {
+    fn build(
+        gpu: &Gpu,
+        shaders: &ShaderLib,
+        audio: &AudioBuffers,
+        sampling: &Sampling,
+        scene_target: &HdrTarget,
+        scene_name: &str,
+    ) -> anyhow::Result<Self> {
         let device = &gpu.device;
-        let audio = AudioBuffers::new(device);
-        let render_scale = 1.0;
-        let scene_target = HdrTarget::new(device, "scene", scaled(gpu.size(), render_scale));
-
-        let sampling = Sampling::new(device);
-        let present_group = sampling.bind(device, &scene_target.view);
-
-        let module = shaders::compile(device, "present", shaders::PRESENT);
-        let present_pipeline = gpu::fullscreen_pipeline(
+        let limiter = Limiter::new(
+            device,
+            shaders,
+            &audio.layout,
+            &scene_target.view,
+            scene_target.size,
+        );
+        let module = shaders.module(device, Shader::Present);
+        let present = gpu::fullscreen_pipeline(
             device,
             "present",
             &module,
-            &[&audio.layout, &sampling.layout],
+            &[&audio.layout, &sampling.layout, &limiter.read_layout],
             gpu.config.format,
             None,
         );
-        let module = shaders::compile(device, "hud", shaders::HUD);
-        let hud_pipeline = gpu::fullscreen_pipeline(
+        let module = shaders.module(device, Shader::Hud);
+        let hud = gpu::fullscreen_pipeline(
             device,
             "hud",
             &module,
-            &[&audio.layout],
+            &[&audio.layout, &limiter.read_layout],
             gpu.config.format,
             Some(wgpu::BlendState::ALPHA_BLENDING),
         );
-
         let init = SceneInit {
             device,
+            shaders,
             audio_layout: &audio.layout,
-            sampling: &sampling,
+            sampling,
             size: scene_target.size,
         };
         let scenes = SceneManager::new(&init, scene_name)?;
-
         Ok(Self {
+            scenes,
+            limiter,
+            present,
+            hud,
+        })
+    }
+}
+
+pub struct Renderer {
+    audio: AudioBuffers,
+    params: FrameParams,
+    sampling: Sampling,
+    scene_target: HdrTarget,
+    /// Internal resolution relative to the window (0.25..1.0).
+    render_scale: f32,
+    present_group: wgpu::BindGroup,
+    p: Pipelines,
+}
+
+impl Renderer {
+    pub fn new(
+        gpu: &Gpu,
+        shaders: &ShaderLib,
+        cfg: &Config,
+        scene_name: &str,
+    ) -> anyhow::Result<Self> {
+        let device = &gpu.device;
+        let audio = AudioBuffers::new(device);
+        let render_scale = cfg.visual.render_scale;
+        let scene_target = HdrTarget::new(device, "scene", scaled(gpu.size(), render_scale));
+        let sampling = Sampling::new(device);
+        let present_group = sampling.bind(device, &scene_target.view);
+        let p = Pipelines::build(gpu, shaders, &audio, &sampling, &scene_target, scene_name)?;
+        let mut renderer = Self {
             audio,
             params: FrameParams::new(),
-            scenes,
+            sampling,
             scene_target,
             render_scale,
-            sampling,
             present_group,
-            present_pipeline,
-            hud_pipeline,
-        })
+            p,
+        };
+        renderer.apply_config(gpu, cfg);
+        Ok(renderer)
+    }
+
+    /// Rebuilds all pipelines from `shaders`, keeping the current scene,
+    /// lock and timing. GPU-side validation errors are caught with an error
+    /// scope; on any error the old pipelines stay in place.
+    pub fn rebuild(&mut self, gpu: &Gpu, shaders: &ShaderLib) -> Result<(), String> {
+        let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let built = Pipelines::build(
+            gpu,
+            shaders,
+            &self.audio,
+            &self.sampling,
+            &self.scene_target,
+            self.p.scenes.current_key(),
+        );
+        let gpu_error = pollster::block_on(scope.pop());
+        match (built, gpu_error) {
+            (Ok(mut p), None) => {
+                p.scenes.adopt_state(&self.p.scenes);
+                self.p = p;
+                Ok(())
+            }
+            (Err(e), _) => Err(format!("{e:#}")),
+            (_, Some(e)) => Err(e.to_string()),
+        }
+    }
+
+    /// Applies the live-reloadable parts of the config.
+    pub fn apply_config(&mut self, gpu: &Gpu, cfg: &Config) {
+        self.params.set_calm(cfg.visual.calm);
+        self.params.set_safety(
+            cfg.safety.max_brightness_rate,
+            cfg.safety.calm_max_brightness_rate,
+        );
+        self.p.scenes.set_timing(
+            f64::from(cfg.visual.rotate_minutes) * 60.0,
+            f64::from(cfg.visual.crossfade_seconds),
+        );
+        if (cfg.visual.render_scale - self.render_scale).abs() > f32::EPSILON {
+            self.render_scale = cfg.visual.render_scale;
+            self.resize(gpu);
+        }
+    }
+
+    pub fn toggle_calm(&mut self) -> bool {
+        self.params.toggle_calm()
+    }
+
+    pub fn calm(&self) -> bool {
+        self.params.calm()
     }
 
     pub fn scenes(&mut self) -> &mut SceneManager {
-        &mut self.scenes
+        &mut self.p.scenes
     }
 
     pub fn scene_name(&self) -> &'static str {
-        self.scenes.name()
+        self.p.scenes.name()
     }
 
     pub fn scenes_locked(&self) -> bool {
-        self.scenes.locked()
+        self.p.scenes.locked()
     }
 
     /// Reallocates size-dependent targets after the window was resized.
@@ -180,7 +271,10 @@ impl Renderer {
         }
         self.scene_target = HdrTarget::new(&gpu.device, "scene", size);
         self.present_group = self.sampling.bind(&gpu.device, &self.scene_target.view);
-        self.scenes.resize(&gpu.device, &self.sampling, size);
+        self.p.scenes.resize(&gpu.device, &self.sampling, size);
+        self.p
+            .limiter
+            .rebind(&gpu.device, &self.scene_target.view, size);
     }
 
     pub fn render(
@@ -196,7 +290,7 @@ impl Renderer {
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
 
         // 1. Upload this frame's audio data (scenes see the scene-target size).
-        let transition = self.scenes.update(time);
+        let transition = self.p.scenes.update(time);
         self.params.update(snap, time, dt, self.scene_target.size);
         self.params.globals.transition = transition;
         queue.write_buffer(
@@ -216,10 +310,14 @@ impl Renderer {
             audio_group: &self.audio.group,
             dt,
         };
-        self.scenes
+        self.p
+            .scenes
             .render(&ctx, &mut encoder, &self.scene_target.view);
 
-        // 3. Present + HUD into the swapchain image, at window resolution.
+        // 3. Safety: measure the scene, update the exposure (GPU only).
+        self.p.limiter.run(&mut encoder, &self.audio.group);
+
+        // 4. Present + HUD into the swapchain image, at window resolution.
         let mut window_globals = self.params.globals;
         let (w, h) = gpu.size();
         window_globals.resolution = [w as f32, h as f32];
@@ -228,16 +326,17 @@ impl Renderer {
             0,
             bytemuck::bytes_of(&window_globals),
         );
-
         {
             let mut pass =
                 gpu::color_pass(&mut encoder, "present", output, Some(wgpu::Color::BLACK));
-            pass.set_pipeline(&self.present_pipeline);
+            pass.set_pipeline(&self.p.present);
             pass.set_bind_group(0, &self.audio.window_group, &[]);
             pass.set_bind_group(1, &self.present_group, &[]);
+            pass.set_bind_group(2, &self.p.limiter.read_group, &[]);
             pass.draw(0..3, 0..1);
             if show_hud {
-                pass.set_pipeline(&self.hud_pipeline);
+                pass.set_pipeline(&self.p.hud);
+                pass.set_bind_group(1, &self.p.limiter.read_group, &[]);
                 pass.draw(0..3, 0..1);
             }
         }

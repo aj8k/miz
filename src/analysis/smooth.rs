@@ -4,7 +4,7 @@
 /// the way to its target each step, so after `tau` seconds it has covered
 /// ~63% of a step change. Expressing smoothing as time constants (instead of
 /// a per-step factor) keeps behaviour identical at any update rate.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AttackRelease {
     pub attack_s: f32,
     pub release_s: f32,

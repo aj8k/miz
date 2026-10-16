@@ -8,7 +8,8 @@
 //!   frame N+1: warp(buf[B]) -> buf[A];  ...
 
 use super::{Scene, SceneCtx, SceneInit};
-use crate::gpu::{self, ADDITIVE, HDR_FORMAT, HdrTarget, Sampling, shaders};
+use crate::gpu::shaders::Shader;
+use crate::gpu::{self, ADDITIVE, HDR_FORMAT, HdrTarget, Sampling};
 
 /// Must match SEGMENTS in feedback_wave.wgsl: 6 vertices per segment.
 const WAVE_SEGMENTS: u32 = 512;
@@ -31,10 +32,10 @@ impl Feedback {
         let device = init.device;
         let layouts = [init.audio_layout, &init.sampling.layout];
 
-        let module = shaders::compile(device, "feedback_warp", shaders::FEEDBACK_WARP);
+        let module = init.shaders.module(device, Shader::FeedbackWarp);
         let warp =
             gpu::fullscreen_pipeline(device, "feedback_warp", &module, &layouts, HDR_FORMAT, None);
-        let module = shaders::compile(device, "feedback_wave", shaders::FEEDBACK_WAVE);
+        let module = init.shaders.module(device, Shader::FeedbackWave);
         let wave = gpu::pipeline(
             device,
             "feedback_wave",
@@ -44,7 +45,7 @@ impl Feedback {
             HDR_FORMAT,
             Some(ADDITIVE),
         );
-        let module = shaders::compile(device, "feedback_display", shaders::FEEDBACK_DISPLAY);
+        let module = init.shaders.module(device, Shader::FeedbackDisplay);
         let display = gpu::fullscreen_pipeline(
             device,
             "feedback_display",

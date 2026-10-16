@@ -32,7 +32,7 @@ pub const FFT_SIZE: usize = 2048;
 /// per second of audio, comfortably above the display frame rate.
 pub const HOP: usize = 512;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AnalyzerConfig {
     pub bands: usize,
     pub f_min: f32,

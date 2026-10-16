@@ -24,7 +24,11 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    pub fn new(event_loop: &ActiveEventLoop, window: Arc<Window>) -> anyhow::Result<Self> {
+    pub fn new(
+        event_loop: &ActiveEventLoop,
+        window: Arc<Window>,
+        power_preference: wgpu::PowerPreference,
+    ) -> anyhow::Result<Self> {
         // The display handle is required by the GL backend on Wayland.
         let instance = wgpu::Instance::new(
             wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
@@ -35,10 +39,10 @@ impl Gpu {
         let surface = instance
             .create_surface(Arc::clone(&window))
             .context("creating the window surface")?;
-        // LowPower = the integrated GPU on a hybrid laptop: plenty for these
-        // shaders, and the discrete GPU can stay asleep (battery, fans).
+        // LowPower (the default) = the integrated GPU on a hybrid laptop:
+        // plenty for these shaders, and the discrete GPU can stay asleep.
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
+            power_preference,
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
             apply_limit_buckets: false,

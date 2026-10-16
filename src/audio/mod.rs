@@ -6,6 +6,7 @@ pub mod test_signal;
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -84,6 +85,8 @@ pub struct AudioEngine {
     status: Arc<Mutex<AudioStatus>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    settings: Sender<(SourceKind, AnalyzerConfig)>,
+    current: (SourceKind, AnalyzerConfig),
 }
 
 impl AudioEngine {
@@ -91,9 +94,12 @@ impl AudioEngine {
         let snapshot = Arc::new(SnapshotCell::new());
         let status = Arc::new(Mutex::new(AudioStatus::Starting));
         let stop = Arc::new(AtomicBool::new(false));
+        let (settings, settings_rx) = channel();
+        let current = (kind, cfg.clone());
         let worker = Worker {
             kind,
             analyzer: Analyzer::new(cfg),
+            settings: settings_rx,
             snapshot: Arc::clone(&snapshot),
             status: Arc::clone(&status),
             stop: Arc::clone(&stop),
@@ -106,7 +112,20 @@ impl AudioEngine {
             status,
             stop,
             thread: Some(thread),
+            settings,
+            current,
         })
+    }
+
+    /// Applies new settings (config reload). Only actual changes are sent:
+    /// a new analyzer starts from scratch (auto-gain, smoothing), and a new
+    /// source restarts capture.
+    pub fn reconfigure(&mut self, kind: SourceKind, cfg: AnalyzerConfig) {
+        if self.current == (kind, cfg.clone()) {
+            return;
+        }
+        self.current = (kind, cfg.clone());
+        let _ = self.settings.send((kind, cfg));
     }
 
     pub fn snapshot(&self) -> &SnapshotCell {
@@ -133,9 +152,15 @@ impl Drop for AudioEngine {
 struct Worker {
     kind: SourceKind,
     analyzer: Analyzer,
+    settings: Receiver<(SourceKind, AnalyzerConfig)>,
     snapshot: Arc<SnapshotCell>,
     status: Arc<Mutex<AudioStatus>>,
     stop: Arc<AtomicBool>,
+}
+
+enum PumpEnd {
+    Stopped,
+    Reopen,
 }
 
 /// How long to wait for data before treating the gap as silence. Data
@@ -156,7 +181,8 @@ impl Worker {
                         backoff.reset();
                     }
                     match result {
-                        Ok(()) => return, // asked to stop
+                        Ok(PumpEnd::Stopped) => return,
+                        Ok(PumpEnd::Reopen) => continue, // source changed: no backoff
                         Err(e) => e,
                     }
                 }
@@ -171,10 +197,14 @@ impl Worker {
         }
     }
 
-    /// Reads from `source` until it fails or we're asked to stop.
-    fn pump(&mut self, source: &mut dyn AudioSource) -> Result<(), AudioError> {
+    /// Reads from `source` until it fails, the source kind changes, or we're
+    /// asked to stop.
+    fn pump(&mut self, source: &mut dyn AudioSource) -> Result<PumpEnd, AudioError> {
         let silence_frames = (POLL.as_secs_f64() * SAMPLE_RATE as f64) as usize;
         while !self.stopped() {
+            if self.apply_settings() {
+                return Ok(PumpEnd::Reopen);
+            }
             let changed = match source.next_block(POLL)? {
                 Some(block) => self.analyzer.push(block),
                 // A stall reads as silence, so visuals fade to idle instead
@@ -185,7 +215,18 @@ impl Worker {
                 self.snapshot.publish(self.analyzer.snapshot());
             }
         }
-        Ok(())
+        Ok(PumpEnd::Stopped)
+    }
+
+    /// Takes pending settings; returns true if the source kind changed.
+    fn apply_settings(&mut self) -> bool {
+        let mut source_changed = false;
+        while let Ok((kind, cfg)) = self.settings.try_recv() {
+            self.analyzer = Analyzer::new(cfg);
+            source_changed |= kind != self.kind;
+            self.kind = kind;
+        }
+        source_changed
     }
 
     /// Waits before a retry while feeding silence, so the idle animation runs.
@@ -193,6 +234,9 @@ impl Worker {
         let deadline = Instant::now() + total;
         let frames = (POLL.as_secs_f64() * SAMPLE_RATE as f64) as usize;
         while !self.stopped() && Instant::now() < deadline {
+            if self.apply_settings() {
+                return; // a different source might work: try it right away
+            }
             thread::sleep(POLL);
             if self.analyzer.push_silence(frames) {
                 self.snapshot.publish(self.analyzer.snapshot());

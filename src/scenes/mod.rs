@@ -7,12 +7,14 @@ pub mod shader;
 
 use anyhow::bail;
 
-use crate::gpu::{Sampling, shaders};
+use crate::gpu::Sampling;
+use crate::gpu::shaders::{Shader, ShaderLib};
 use shader::ShaderScene;
 
 /// Everything a scene needs to build its GPU resources.
 pub struct SceneInit<'a> {
     pub device: &'a wgpu::Device,
+    pub shaders: &'a ShaderLib,
     /// Layout of group 0 (globals, bands, waveform) shared by all pipelines.
     pub audio_layout: &'a wgpu::BindGroupLayout,
     /// Layout + sampler for reading back a texture (group 1).
@@ -58,9 +60,9 @@ pub fn create(name: &str, init: &SceneInit) -> anyhow::Result<Box<dyn Scene>> {
     Ok(match name {
         "feedback" => Box::new(feedback::Feedback::new(init)),
         "lissajous" => Box::new(lissajous::Lissajous::new(init)),
-        "radial" => Box::new(ShaderScene::new(init, "radial spectrum", shaders::RADIAL)),
-        "nebula" => Box::new(ShaderScene::new(init, "nebula", shaders::NEBULA)),
-        "bass-pulse" => Box::new(ShaderScene::new(init, "bass pulse", shaders::BASS_PULSE)),
+        "radial" => Box::new(ShaderScene::new(init, "radial spectrum", Shader::Radial)),
+        "nebula" => Box::new(ShaderScene::new(init, "nebula", Shader::Nebula)),
+        "bass-pulse" => Box::new(ShaderScene::new(init, "bass pulse", Shader::BassPulse)),
         other => bail!(
             "unknown scene '{other}' (available: {}, {})",
             ROTATION.join(", "),

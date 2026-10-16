@@ -27,11 +27,21 @@ struct Globals {
     bass_slow: f32,
     treble_slow: f32,
     loudness_slow: f32,
-    _pad0: f32,
-    _pad1: f32,
+    // Safety limiter: max change of mean brightness per second (luma.wgsl).
+    safety_rate: f32,
+    _pad: f32,
     // Two most recent "light waves" (started by strong beats, at most ~2/s):
     // (age0 seconds, strength0, age1, strength1). Age is huge when unused.
     waves: vec4<f32>,
+};
+
+// State of the brightness-rate limiter (written by luma.wgsl, read by
+// present.wgsl and the HUD).
+struct Limiter {
+    adapted: f32,     // mean brightness we allow on screen this frame
+    exposure: f32,    // multiplier that turns the real mean into `adapted`
+    mean: f32,        // the scene's real mean brightness this frame
+    initialized: f32,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;

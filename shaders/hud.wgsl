@@ -1,7 +1,11 @@
 // Debug HUD, drawn procedurally over the final image (alpha blended).
 // Bottom panel: band levels on the left; on the right one meter per row:
-// bass, low-mid, high-mid, treble, loudness, width, gain — plus a beat dot.
+// bass, low-mid, high-mid, treble, loudness, width, gain, and the safety
+// limiter's activity (empty = idle; it grows while the limiter is holding
+// the brightness back) — plus a beat dot.
 // Colours here are display (sRGB) values: the target is a non-sRGB swapchain.
+
+@group(1) @binding(0) var<storage, read> lim: Limiter;
 
 fn in_rect(p: vec2<f32>, lo: vec2<f32>, hi: vec2<f32>) -> bool {
     return all(p >= lo) && all(p < hi);
@@ -40,7 +44,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         }
     } else {
         // Meters, one per row.
-        let rows = 7.0;
+        let rows = 8.0;
         let fy = (px.y - ilo.y) / size.y * rows;
         if fy < 0.0 || fy >= rows {
             return col; // the panel's padding
@@ -56,7 +60,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             case 3u: { v = g.treble;   c = vec3<f32>(0.40, 0.75, 0.95); }
             case 4u: { v = g.loudness; c = vec3<f32>(0.85, 0.85, 0.85); }
             case 5u: { v = g.width;    c = vec3<f32>(0.75, 0.55, 0.95); }
-            default: { v = g.gain;     c = vec3<f32>(0.55, 0.55, 0.60); }
+            case 6u: { v = g.gain;     c = vec3<f32>(0.55, 0.55, 0.60); }
+            default: { v = clamp(abs(log2(lim.exposure)), 0.0, 1.0); c = vec3<f32>(1.0, 0.35, 0.3); }
         }
         let beat_d = 0.9 * size.y / rows;
         let x0 = split;

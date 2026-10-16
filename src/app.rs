@@ -15,22 +15,26 @@ use winit::window::{Fullscreen, Window, WindowId};
 use crate::audio::{AudioEngine, AudioStatus};
 use crate::capture;
 use crate::cli::Options;
+use crate::config::{self, Config};
 use crate::gpu::Gpu;
+use crate::gpu::shaders::{self, ShaderLib};
 use crate::render::Renderer;
 use crate::snapshot::Snapshot;
+use crate::watch::{Change, Watcher};
 
 const CURSOR_HIDE_AFTER: Duration = Duration::from_secs(3);
-/// Frame-rate target. We render at refresh / N for the integer N that gets
-/// closest to this (144 Hz -> 72 fps, 120 -> 60, 60 -> 60): every frame
-/// then stays on screen for the same number of refreshes, so motion is
-/// even, while the GPU/CPU do a fraction of the work of full refresh rate.
-const TARGET_FPS: f64 = 60.0;
-
-pub fn run(engine: AudioEngine, opts: Options) -> anyhow::Result<()> {
+pub fn run(
+    engine: AudioEngine,
+    opts: Options,
+    cfg: Config,
+    config_path: Option<PathBuf>,
+) -> anyhow::Result<()> {
     let event_loop = EventLoop::new().context("creating the event loop")?;
     let mut app = App {
         engine,
         opts,
+        cfg,
+        config_path,
         state: None,
         error: None,
     };
@@ -44,10 +48,20 @@ pub fn run(engine: AudioEngine, opts: Options) -> anyhow::Result<()> {
 struct App {
     engine: AudioEngine,
     opts: Options,
+    cfg: Config,
+    config_path: Option<PathBuf>,
     /// Created on `resumed` (winit only allows creating windows from there).
     state: Option<State>,
     /// A startup error, reported after the event loop exits.
     error: Option<anyhow::Error>,
+}
+
+/// The parts of `App` a reload needs (split borrow from `State`).
+struct AppReload<'a> {
+    engine: &'a mut AudioEngine,
+    cfg: &'a mut Config,
+    config_path: Option<&'a std::path::Path>,
+    source_override: Option<crate::audio::SourceKind>,
 }
 
 /// `--capture` progress.
@@ -74,7 +88,12 @@ struct State {
     capture: Option<Capture>,
     /// Set when the app should quit (capture finished or failed).
     finished: Option<anyhow::Result<()>>,
+    /// See `frame_interval`.
+    target_fps: f64,
     frame_interval: Duration,
+    /// Shader directory in dev mode (None = shaders built into the binary).
+    shader_dir: Option<PathBuf>,
+    watcher: Option<Watcher>,
     /// Ideal time of the next frame on a fixed timeline (not "now +
     /// interval", which would drift by however late each wakeup was).
     next_frame: Instant,
@@ -82,7 +101,12 @@ struct State {
 }
 
 impl State {
-    fn new(event_loop: &ActiveEventLoop, opts: &Options) -> anyhow::Result<Self> {
+    fn new(
+        event_loop: &ActiveEventLoop,
+        opts: &Options,
+        cfg: &Config,
+        config_path: Option<&std::path::Path>,
+    ) -> anyhow::Result<Self> {
         let attrs = Window::default_attributes()
             .with_title("miz")
             .with_inner_size(LogicalSize::new(1280.0, 720.0))
@@ -92,10 +116,39 @@ impl State {
                 .create_window(attrs)
                 .context("creating the window")?,
         );
-        let gpu = Gpu::new(event_loop, Arc::clone(&window))?;
-        let renderer = Renderer::new(&gpu, &opts.scene)?;
+        let power = match cfg.visual.gpu.as_str() {
+            "high-performance" => wgpu::PowerPreference::HighPerformance,
+            _ => wgpu::PowerPreference::LowPower,
+        };
+        let gpu = Gpu::new(event_loop, Arc::clone(&window), power)?;
+
+        // Dev mode: shaders from disk (config dir, else the source tree).
+        let shader_dir = match (opts.dev, cfg.shader_dir()) {
+            (_, Some(dir)) => Some(dir),
+            (true, None) => Some(shaders::source_tree_dir()),
+            (false, None) => None,
+        };
+        let shaders = ShaderLib::load(shader_dir.as_deref())
+            .map_err(|e| anyhow::anyhow!("shader errors:\n{e}"))?;
+        if let Some(dir) = &shader_dir {
+            eprintln!(
+                "miz: dev mode, shaders from {} (reloaded on save)",
+                dir.display()
+            );
+        }
+        let scene = opts.scene.as_deref().unwrap_or(&cfg.visual.scene);
+        let renderer = Renderer::new(&gpu, &shaders, cfg, scene)?;
+        let watcher = match Watcher::new(config_path, shader_dir.as_deref()) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                log::warn!("file watching unavailable, no hot reload: {e}");
+                None
+            }
+        };
+
         let now = Instant::now();
-        let interval = frame_interval(&window);
+        let target_fps = f64::from(cfg.visual.target_fps);
+        let interval = frame_interval(&window, target_fps);
         log::info!("frame interval {:.2} ms", interval.as_secs_f64() * 1e3);
         Ok(Self {
             window,
@@ -116,7 +169,10 @@ impl State {
                 done: 0,
             }),
             finished: None,
+            target_fps,
             frame_interval: interval,
+            shader_dir,
+            watcher,
             next_frame: now,
             redraw_pending: true,
         })
@@ -154,7 +210,7 @@ impl State {
         let elapsed = self.fps_window_start.elapsed();
         if elapsed >= Duration::from_secs(1) {
             // Cheap, and catches the window moving to another monitor.
-            self.frame_interval = frame_interval(&self.window);
+            self.frame_interval = frame_interval(&self.window, self.target_fps);
             let fps = self.fps_frames as f32 / elapsed.as_secs_f32();
             self.update_title(fps, &engine.status());
             self.fps_frames = 0;
@@ -192,7 +248,15 @@ impl State {
         } else {
             ""
         };
-        let mut title = format!("miz — {}{lock} — {fps:.0} fps", self.renderer.scene_name());
+        let mode = if self.renderer.calm() {
+            "calm"
+        } else {
+            "energetic"
+        };
+        let mut title = format!(
+            "miz — {}{lock} — {mode} — {fps:.0} fps",
+            self.renderer.scene_name()
+        );
         if self.show_hud {
             title += &format!(" — gain {:.0} dB", self.snap.gain_db);
         }
@@ -201,6 +265,48 @@ impl State {
         }
         log::debug!("{title}");
         self.window.set_title(&title);
+    }
+
+    /// Applies settled config / shader file changes (hot reload).
+    fn reload(&mut self, changes: &[Change], app: &mut AppReload) {
+        for change in changes {
+            match change {
+                Change::Config => {
+                    let Some(path) = app.config_path else {
+                        continue;
+                    };
+                    match config::load(path) {
+                        Ok(cfg) => {
+                            self.renderer.apply_config(&self.gpu, &cfg);
+                            self.target_fps = f64::from(cfg.visual.target_fps);
+                            self.frame_interval = frame_interval(&self.window, self.target_fps);
+                            // A --source flag keeps priority over the file.
+                            let source = app
+                                .source_override
+                                .or_else(|| cfg.source_kind())
+                                .unwrap_or(crate::audio::SourceKind::PipeWire);
+                            app.engine.reconfigure(source, cfg.analyzer());
+                            if cfg.visual.gpu != app.cfg.visual.gpu {
+                                eprintln!("miz: visual.gpu changes take effect after a restart");
+                            }
+                            *app.cfg = cfg;
+                            eprintln!("miz: config reloaded");
+                        }
+                        Err(e) => eprintln!("miz: {e:#}\nmiz: keeping the previous config"),
+                    }
+                }
+                Change::Shaders => {
+                    let result = ShaderLib::load(self.shader_dir.as_deref())
+                        .and_then(|lib| self.renderer.rebuild(&self.gpu, &lib));
+                    match result {
+                        Ok(()) => eprintln!("miz: shaders reloaded"),
+                        Err(e) => {
+                            eprintln!("miz: shader errors, keeping the previous shaders:\n{e}")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn toggle_fullscreen(&mut self) {
@@ -235,7 +341,12 @@ impl ApplicationHandler for App {
         if self.state.is_some() {
             return;
         }
-        match State::new(event_loop, &self.opts) {
+        match State::new(
+            event_loop,
+            &self.opts,
+            &self.cfg,
+            self.config_path.as_deref(),
+        ) {
             Ok(state) => {
                 state.window.request_redraw();
                 self.state = Some(state);
@@ -292,6 +403,10 @@ impl ApplicationHandler for App {
                     KeyCode::KeyN => scenes.next(time),
                     KeyCode::KeyP => scenes.prev(time),
                     KeyCode::KeyL => scenes.toggle_lock(),
+                    KeyCode::KeyC => {
+                        let calm = state.renderer.toggle_calm();
+                        eprintln!("miz: {} mode", if calm { "calm" } else { "energetic" });
+                    }
                     KeyCode::Digit1 => scenes.jump(0, time),
                     KeyCode::Digit2 => scenes.jump(1, time),
                     KeyCode::Digit3 => scenes.jump(2, time),
@@ -309,6 +424,17 @@ impl ApplicationHandler for App {
         let Some(state) = self.state.as_mut() else {
             return;
         };
+        if let Some(changes) = state.watcher.as_mut().map(Watcher::poll)
+            && !changes.is_empty()
+        {
+            let mut app = AppReload {
+                engine: &mut self.engine,
+                cfg: &mut self.cfg,
+                config_path: self.config_path.as_deref(),
+                source_override: self.opts.source,
+            };
+            state.reload(&changes, &mut app);
+        }
         state.update_cursor();
         if state.redraw_pending {
             // Sleep until the redraw event arrives (on Wayland it waits for
@@ -324,12 +450,16 @@ impl ApplicationHandler for App {
     }
 }
 
-/// Frame interval for `TARGET_FPS` on the window's current monitor.
-fn frame_interval(window: &Window) -> Duration {
+/// Frame interval on the window's current monitor. We render at
+/// refresh / N for the integer N that gets closest to `target_fps` (144 Hz
+/// -> 72 fps, 120 -> 60, 60 -> 60): every frame then stays on screen for
+/// the same number of refreshes, so motion is even, while the GPU/CPU do a
+/// fraction of the work of running at the full refresh rate.
+fn frame_interval(window: &Window, target_fps: f64) -> Duration {
     let refresh = window
         .current_monitor()
         .and_then(|m| m.refresh_rate_millihertz())
-        .map_or(TARGET_FPS, |mhz| f64::from(mhz) / 1000.0);
-    let divisor = (refresh / TARGET_FPS).round().max(1.0);
+        .map_or(target_fps, |mhz| f64::from(mhz) / 1000.0);
+    let divisor = (refresh / target_fps).round().max(1.0);
     Duration::from_secs_f64(divisor / refresh)
 }

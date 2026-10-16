@@ -2,7 +2,8 @@
 //! spectrum, nebula): all the work happens per pixel in WGSL.
 
 use super::{Scene, SceneCtx, SceneInit};
-use crate::gpu::{self, HDR_FORMAT, shaders};
+use crate::gpu::shaders::Shader;
+use crate::gpu::{self, HDR_FORMAT};
 
 pub struct ShaderScene {
     name: &'static str,
@@ -10,10 +11,10 @@ pub struct ShaderScene {
 }
 
 impl ShaderScene {
-    /// `source` must define `fs_main` (the vertex stage is the shared
+    /// `shader` must define `fs_main` (the vertex stage is the shared
     /// fullscreen triangle from common.wgsl).
-    pub fn new(init: &SceneInit, name: &'static str, source: &str) -> Self {
-        let module = shaders::compile(init.device, name, source);
+    pub fn new(init: &SceneInit, name: &'static str, shader: Shader) -> Self {
+        let module = init.shaders.module(init.device, shader);
         let pipeline = gpu::fullscreen_pipeline(
             init.device,
             name,

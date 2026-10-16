@@ -6,15 +6,17 @@ mod app;
 mod audio;
 mod capture;
 mod cli;
+mod config;
 mod debug_term;
 mod gpu;
 mod render;
 mod scenes;
 mod snapshot;
+mod watch;
 
-use analysis::AnalyzerConfig;
-use audio::AudioEngine;
+use audio::{AudioEngine, SourceKind};
 use cli::Command;
+use config::Config;
 
 fn main() -> anyhow::Result<()> {
     // sctk_adwaita (winit's Wayland window decorations) warns about GNOME
@@ -35,9 +37,21 @@ fn main() -> anyhow::Result<()> {
         Command::Run(opts) => opts,
     };
 
-    let engine = AudioEngine::start(opts.source, AnalyzerConfig::default())?;
+    // Config: --config, else ~/.config/miz/config.toml (created on first run).
+    let config_path = opts.config.clone().or_else(config::default_path);
+    let cfg = match &config_path {
+        Some(path) => config::load_or_create(path)?,
+        None => Config::default(),
+    };
+    // Command-line flags win over the config file.
+    let source = opts
+        .source
+        .or_else(|| cfg.source_kind())
+        .unwrap_or(SourceKind::PipeWire);
+
+    let engine = AudioEngine::start(source, cfg.analyzer())?;
     if opts.debug_audio {
         return debug_term::run(&engine);
     }
-    app::run(engine, opts)
+    app::run(engine, opts, cfg, config_path)
 }

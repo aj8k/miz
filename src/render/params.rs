@@ -33,7 +33,8 @@ pub struct Globals {
     pub bass_slow: f32,
     pub treble_slow: f32,
     pub loudness_slow: f32,
-    pub _pad: [f32; 2],
+    pub safety_rate: f32,
+    pub _pad: f32,
     /// Two most recent "light waves" (strong beats): age in seconds and
     /// strength, as (age0, strength0, age1, strength1).
     pub waves: [f32; 4],
@@ -46,6 +47,8 @@ const FRAME_SMOOTHING_S: f32 = 0.045;
 /// The "slow" features: for things that should drift with the music's
 /// overall energy (zoom, brightness, detail) rather than follow each hit.
 const SLOW: AttackRelease = AttackRelease::new(0.5, 1.5);
+/// Calm mode on/off eases over this time constant (seconds).
+const CALM_FADE_S: f32 = 0.8;
 /// A beat starts a light wave only if it's this strong ...
 const WAVE_MIN_STRENGTH: f32 = 0.45;
 /// ... and at least this long after the previous wave.
@@ -57,6 +60,12 @@ pub struct FrameParams {
     /// f64: an f32 accumulator would lose precision after hours of running.
     energy_time: f64,
     last_beat_count: u32,
+    /// Beat pulse before calm-mode softening.
+    beat: f32,
+    /// Where `globals.calm` is heading (it eases there; see `update`).
+    calm_target: f32,
+    safety_rate: f32,
+    calm_safety_rate: f32,
 }
 
 impl FrameParams {
@@ -72,7 +81,30 @@ impl FrameParams {
             bands: [0.0; MAX_BANDS],
             energy_time: 0.0,
             last_beat_count: 0,
+            beat: 0.0,
+            calm_target: 1.0,
+            safety_rate: 0.25,
+            calm_safety_rate: 0.12,
         }
+    }
+
+    pub fn set_calm(&mut self, calm: bool) {
+        self.calm_target = if calm { 1.0 } else { 0.0 };
+    }
+
+    /// Returns the new state (true = calm).
+    pub fn toggle_calm(&mut self) -> bool {
+        self.calm_target = 1.0 - self.calm_target;
+        self.calm_target > 0.5
+    }
+
+    pub fn calm(&self) -> bool {
+        self.calm_target > 0.5
+    }
+
+    pub fn set_safety(&mut self, rate: f32, calm_rate: f32) {
+        self.safety_rate = rate;
+        self.calm_safety_rate = calm_rate;
     }
 
     pub fn update(&mut self, snap: &Snapshot, time: f64, dt: f32, resolution: (u32, u32)) {
@@ -86,8 +118,15 @@ impl FrameParams {
         lerp(&mut g.loudness, snap.loudness);
         lerp(&mut g.width, snap.width);
         lerp(&mut g.idle, snap.idle);
-        // The beat pulse should rise a little quicker than everything else.
-        g.beat += (snap.beat - g.beat) * one_pole_alpha(dt, 0.02);
+        // Calm mode fades in and out over a couple of seconds: switching it
+        // must not itself cause a sudden change.
+        g.calm += (self.calm_target - g.calm) * one_pole_alpha(dt, CALM_FADE_S);
+        let calm = g.calm;
+
+        // The beat pulse should rise a little quicker than everything else;
+        // calm mode softens it for every scene.
+        self.beat += (snap.beat - self.beat) * one_pole_alpha(dt, 0.02);
+        g.beat = self.beat * (1.0 - 0.4 * calm);
         for (b, &s) in self.bands.iter_mut().zip(snap.bands()) {
             *b += (s - *b) * a;
         }
@@ -112,6 +151,8 @@ impl FrameParams {
         // drift instead of stopping.
         let speed = 0.35 + 1.1 * g.loudness;
         let speed = speed + (0.2 - speed) * g.idle;
+        // Calm mode: everything moves at ~2/3 speed.
+        let speed = speed * (1.0 - 0.35 * calm);
         self.energy_time += f64::from(dt * speed);
 
         g.resolution = [resolution.0 as f32, resolution.1 as f32];
@@ -123,6 +164,7 @@ impl FrameParams {
         g.frame = g.frame.wrapping_add(1);
         // Auto-gain reference from its floor (-70 dB) to 0 dBFS -> 0..1.
         g.gain = ((snap.gain_db + 70.0) / 70.0).clamp(0.0, 1.0);
+        g.safety_rate = self.safety_rate + (self.calm_safety_rate - self.safety_rate) * calm;
     }
 }
 

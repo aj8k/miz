@@ -5,7 +5,8 @@
 //! display pass adds glow and graticule into the scene target.
 
 use super::{Scene, SceneCtx, SceneInit};
-use crate::gpu::{self, ADDITIVE, HDR_FORMAT, HdrTarget, Sampling, shaders};
+use crate::gpu::shaders::Shader;
+use crate::gpu::{self, ADDITIVE, HDR_FORMAT, HdrTarget, Sampling};
 
 /// Must match SEGMENTS in lissajous_line.wgsl: 6 vertices per segment.
 const SEGMENTS: u32 = 1023;
@@ -35,7 +36,7 @@ pub struct Lissajous {
 impl Lissajous {
     pub fn new(init: &SceneInit) -> Self {
         let device = init.device;
-        let module = shaders::compile(device, "lissajous_decay", shaders::LISSAJOUS_DECAY);
+        let module = init.shaders.module(device, Shader::LissajousDecay);
         let decay = gpu::fullscreen_pipeline(
             device,
             "lissajous_decay",
@@ -44,7 +45,7 @@ impl Lissajous {
             HDR_FORMAT,
             Some(MULTIPLY_BY_CONSTANT),
         );
-        let module = shaders::compile(device, "lissajous_line", shaders::LISSAJOUS_LINE);
+        let module = init.shaders.module(device, Shader::LissajousLine);
         let line = gpu::pipeline(
             device,
             "lissajous_line",
@@ -54,7 +55,7 @@ impl Lissajous {
             HDR_FORMAT,
             Some(ADDITIVE),
         );
-        let module = shaders::compile(device, "lissajous_display", shaders::LISSAJOUS_DISPLAY);
+        let module = init.shaders.module(device, Shader::LissajousDisplay);
         let display = gpu::fullscreen_pipeline(
             device,
             "lissajous_display",
