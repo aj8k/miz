@@ -30,6 +30,10 @@ use crate::render::Renderer;
 use crate::snapshot::Snapshot;
 use crate::watch::{Change, Watcher};
 
+/// Reverse-DNS app ID: names the desktop file, icon, AppStream metainfo and
+/// Flatpak, and must match the window's Wayland app_id.
+const APP_ID: &str = "com.antonjoy.miz";
+
 const CURSOR_HIDE_AFTER: Duration = Duration::from_secs(3);
 
 pub fn run(
@@ -132,10 +136,10 @@ impl State {
             .with_title("miz")
             .with_inner_size(LogicalSize::new(1280.0, 720.0))
             .with_min_inner_size(LogicalSize::new(320.0, 200.0));
-        // Wayland app_id / X11 WM_CLASS "miz": lets the desktop match the
-        // window to miz.desktop (dock icon, grouping).
-        let attrs = WindowAttributesExtWayland::with_name(attrs, "miz", "miz");
-        let attrs = WindowAttributesExtX11::with_name(attrs, "miz", "miz");
+        // Wayland app_id / X11 WM_CLASS = the app ID: lets the desktop match
+        // the window to com.antonjoy.miz.desktop (dock icon, grouping).
+        let attrs = WindowAttributesExtWayland::with_name(attrs, APP_ID, APP_ID);
+        let attrs = WindowAttributesExtX11::with_name(attrs, APP_ID, APP_ID);
         let window = Arc::new(
             event_loop
                 .create_window(attrs)

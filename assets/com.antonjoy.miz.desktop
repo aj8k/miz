@@ -3,10 +3,10 @@ Type=Application
 Name=miz
 GenericName=Music Visualizer
 Comment=Calm visuals for whatever is playing
-# Replaced with the absolute install path by scripts/install.sh.
-Exec=@BINDIR@/miz
-Icon=miz
+# scripts/install.sh rewrites this to the absolute install path.
+Exec=miz
+Icon=com.antonjoy.miz
 Terminal=false
 Categories=AudioVideo;Audio;
 Keywords=music;visualizer;spectrum;milkdrop;
-StartupWMClass=miz
+StartupWMClass=com.antonjoy.miz

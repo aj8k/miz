@@ -3,6 +3,10 @@ name = "miz"
 version = "0.1.0"
 edition = "2024"
 description = "A calm, native music visualizer for PipeWire"
+license = "MIT"
+authors = ["Anton Joy <anton@antonjoy.com>"]
+repository = "https://github.com/aj8k/miz"
+readme = "README.md"
 
 [dependencies]
 # Error type with context for startup / top-level failures.

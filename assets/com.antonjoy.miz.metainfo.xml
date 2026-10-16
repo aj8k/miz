@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.antonjoy.miz</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>miz</name>
+  <summary>Calm music visualizer for PipeWire</summary>
+  <developer id="com.antonjoy">
+    <name>Anton Joy</name>
+  </developer>
+
+  <description>
+    <p>
+      miz turns whatever your computer is playing — a music app, a browser,
+      anything — into slow, flowing visuals made for listening: feedback
+      tunnels, a stereo scope, a radial spectrum and a nebula, with gentle
+      crossfades between them.
+    </p>
+    <ul>
+      <li>Listens only to what you hear (the monitor of the default output),
+        never to a microphone: Bluetooth headphones keep their high-quality
+        profile and other apps keep their mic</li>
+      <li>Photosensitivity limiter in every mode: the picture's average
+        brightness cannot change fast enough to flash</li>
+      <li>Calm mode by default, energetic mode one key away</li>
+      <li>Light on the CPU and battery; slows down when nothing is playing</li>
+      <li>Small settings menu, keyboard shortcuts and a documented config
+        file that applies while running</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">com.antonjoy.miz.desktop</launchable>
+  <provides>
+    <binary>miz</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/aj8k/miz</url>
+  <url type="bugtracker">https://github.com/aj8k/miz/issues</url>
+  <url type="vcs-browser">https://github.com/aj8k/miz</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>The four scenes: feedback warp, stereo scope, radial spectrum and nebula</caption>
+      <image>https://raw.githubusercontent.com/aj8k/miz/v0.1.0/docs/scenes.jpg</image>
+    </screenshot>
+    <screenshot>
+      <caption>Settings menu over the nebula scene</caption>
+      <image>https://raw.githubusercontent.com/aj8k/miz/v0.1.0/docs/menu.jpg</image>
+    </screenshot>
+  </screenshots>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#b57ce8</color>
+    <color type="primary" scheme_preference="dark">#2a1640</color>
+  </branding>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+  </categories>
+  <keywords>
+    <keyword>music</keyword>
+    <keyword>visualizer</keyword>
+    <keyword>spectrum</keyword>
+    <keyword>milkdrop</keyword>
+    <keyword>pipewire</keyword>
+  </keywords>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2026-10-16">
+      <description>
+        <p>First release.</p>
+        <ul>
+          <li>Feedback warp, stereo scope, radial spectrum and nebula scenes</li>
+          <li>Calm and energetic modes, photosensitivity limiter</li>
+          <li>Settings menu with Save as default; config hot reload</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+</component>

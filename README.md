@@ -31,6 +31,8 @@ scripts/install.sh --uninstall
 
 `install.sh` puts the binary in `~/.local/bin`, a launcher entry in
 `~/.local/share/applications` and the icon in `~/.local/share/icons`.
+The app ID (desktop file, icon, AppStream metainfo, Wayland app_id) is
+`com.antonjoy.miz`.
 
 ## Usage
 
@@ -178,3 +180,7 @@ src/
   config.rs   config file
 shaders/      WGSL; common.wgsl is prepended to every shader
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
