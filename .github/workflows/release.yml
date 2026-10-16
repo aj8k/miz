@@ -1,0 +1,109 @@
+name: Release
+
+# Pushing a tag like v0.1.0 builds the .deb, the Flatpak bundle and the snap,
+# then attaches all three to a draft GitHub release. Running it by hand
+# (workflow_dispatch) only builds them; they stay as workflow artifacts.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deb:
+    # Built on the oldest supported Ubuntu: the binary then needs only
+    # glibc 2.39, where a 26.04 build needs 2.43.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check that the tag matches Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in Cargo.toml"
+            exit 1
+          fi
+      - run: rustup update --no-self-update stable && rustup default stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+      - run: cargo deb --locked
+      - name: Check the glibc requirement
+        run: |
+          needed=$(objdump -T target/release/miz | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
+          echo "miz needs glibc $needed"
+          if [ "$(printf '%s\n' "$needed" 2.39 | sort -V | tail -1)" != 2.39 ]; then
+            echo "::error::miz needs glibc $needed, newer than Ubuntu 24.04's 2.39"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deb
+          path: target/debian/*.deb
+          if-no-files-found: error
+
+  flatpak:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v7
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: packaging/flatpak/com.antonjoy.miz.yml
+          bundle: com.antonjoy.miz.flatpak
+          artifact-name: flatpak
+          # The manifest's `type: dir` source copies the whole checkout and
+          # skips exactly these two directories.
+          build-dir: packaging/flatpak/build
+          repo-dir: packaging/flatpak/repo
+          # Like Flathub: fetch the metainfo screenshots into the repo, so
+          # the repo lint below checks them too.
+          mirror-screenshots-url: https://dl.flathub.org/media
+      - name: Lint the manifest
+        run: flatpak-builder-lint --gha-format --exceptions manifest packaging/flatpak/com.antonjoy.miz.yml
+      - name: Lint the repo
+        run: flatpak-builder-lint --gha-format --exceptions repo packaging/flatpak/repo
+
+  snap:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      # Builds in LXD, with Rust from rustup's stable channel (the rust
+      # plugin's default).
+      - uses: snapcore/action-build@v1
+        id: build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snap
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
+
+  release:
+    needs: [deb, flatpak, snap]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attach the packages to a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          # A re-run replaces the files on the draft instead of failing.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag \
+              --title "miz ${GITHUB_REF_NAME#v}" --generate-notes
+          fi

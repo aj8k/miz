@@ -20,9 +20,10 @@ files in this repository are ready. Each section lists what is still left.
 
 1. `cargo deb` creates `target/debian/miz_0.1.0-1_amd64.deb`.
 2. A .deb built on Ubuntu 26.04 needs glibc 2.43, so it installs only on
-   26.04 and newer. To support 24.04, build it on 24.04 instead, for example
-   in a GitHub Actions `ubuntu-24.04` job.
-3. Attach the .deb to the v0.1.0 GitHub release. Users install it with
+   26.04 and newer. `.github/workflows/release.yml` builds it on 24.04
+   instead (glibc 2.39). On a `v*` tag push it also builds the Flatpak
+   bundle and the snap, and attaches all three to a draft release.
+3. Check the draft release for v0.1.0, then publish it. Users install it with
    `sudo apt install ./miz_0.1.0-1_amd64.deb`. An apt repository or a
    Launchpad PPA are possible later steps; a PPA needs vendored crates,
    because Launchpad builds offline.
