@@ -1,0 +1,48 @@
+id: com.antonjoy.miz
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: miz
+finish-args:
+  # winit: Wayland, X11 only as a fallback.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # wgpu: Vulkan (GL as fallback) on the GPU.
+  - --device=dri
+  # The host PipeWire socket, for the runtime's pw-record. miz records only
+  # the monitor of the default output (stream.capture.sink=true), never a
+  # microphone; it doesn't play audio, hence no --socket=pulseaudio.
+  - --filesystem=xdg-run/pipewire-0:ro
+modules:
+  - name: miz
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/miz/cargo
+        CARGO_NET_OFFLINE: 'true'
+    build-commands:
+      - cargo build --release --locked
+      - install -Dm755 target/release/miz /app/bin/miz
+      - install -Dm644 assets/com.antonjoy.miz.desktop /app/share/applications/com.antonjoy.miz.desktop
+      - install -Dm644 assets/com.antonjoy.miz.svg /app/share/icons/hicolor/scalable/apps/com.antonjoy.miz.svg
+      - install -Dm644 assets/com.antonjoy.miz.metainfo.xml /app/share/metainfo/com.antonjoy.miz.metainfo.xml
+      - install -Dm644 LICENSE /app/share/licenses/com.antonjoy.miz/LICENSE
+    sources:
+      # Local builds use the working tree; the Flathub copy of this manifest
+      # replaces it with a git source pinned to a release tag and commit.
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - target
+          - .flatpak-builder
+          - packaging/flatpak/build
+          - packaging/flatpak/repo
+      # Every crate from Cargo.lock, for the offline build. Regenerate after
+      # changing dependencies:
+      #   flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+      - cargo-sources.json

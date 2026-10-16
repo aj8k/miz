@@ -41,6 +41,14 @@ The app ID (desktop file, icon, AppStream metainfo, Wayland app_id) is
   file, icon, metainfo; depends on `pipewire-bin`). It needs the glibc of
   the system it was built on or newer, so build on the oldest Ubuntu you
   want to support.
+- **Flatpak** — `packaging/flatpak/com.antonjoy.miz.yml` (freedesktop
+  runtime 26.08, which ships `pw-record`; crates vendored in
+  `cargo-sources.json` for the offline build). With `org.flatpak.Builder`
+  from Flathub:
+  `flatpak run org.flatpak.Builder --user --install --force-clean packaging/flatpak/build packaging/flatpak/com.antonjoy.miz.yml`.
+  The only audio permission is the PipeWire socket
+  (`xdg-run/pipewire-0`, read-only); the config lives in
+  `~/.var/app/com.antonjoy.miz/config/miz/`.
 
 ## Usage
 
