@@ -47,3 +47,28 @@ codegen-units = 1
 # The DSP runs per audio hop; keep it fast even in debug builds.
 [profile.dev.package."*"]
 opt-level = 2
+
+# `cargo deb` (cargo install cargo-deb) -> target/debian/miz_<version>-1_<arch>.deb
+[package.metadata.deb]
+maintainer = "Anton Joy <anton@antonjoy.com>"
+section = "sound"
+copyright = "2026 Anton Joy"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+miz turns whatever the computer is playing into slow, flowing visuals: \
+feedback tunnels, a stereo scope, a radial spectrum and a nebula. It \
+captures only the monitor of the default output through pw-record, never \
+a microphone, and limits how fast the picture's brightness may change."""
+# winit, wgpu and pw-record are loaded at runtime (dlopen / child process),
+# so $auto can't see them: Vulkan + EGL, Wayland, and PipeWire's pw-record.
+depends = "$auto, pipewire-bin, libvulkan1, libegl1, libwayland-client0, libwayland-egl1, libxkbcommon0"
+# X11 sessions (winit's X11 backend), GPU drivers, the session manager that
+# links pw-record to the output.
+recommends = "wireplumber, mesa-vulkan-drivers | vulkan-icd, libx11-6, libx11-xcb1, libxcursor1, libxi6, libxkbcommon-x11-0"
+assets = [
+    ["target/release/miz", "usr/bin/", "755"],
+    ["assets/com.antonjoy.miz.desktop", "usr/share/applications/", "644"],
+    ["assets/com.antonjoy.miz.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["assets/com.antonjoy.miz.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["README.md", "usr/share/doc/miz/", "644"],
+]

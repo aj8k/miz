@@ -34,6 +34,14 @@ scripts/install.sh --uninstall
 The app ID (desktop file, icon, AppStream metainfo, Wayland app_id) is
 `com.antonjoy.miz`.
 
+### Packages
+
+- **.deb** — `cargo install cargo-deb`, then `cargo deb` builds
+  `target/debian/miz_<version>-1_amd64.deb` (binary in `/usr/bin`, desktop
+  file, icon, metainfo; depends on `pipewire-bin`). It needs the glibc of
+  the system it was built on or newer, so build on the oldest Ubuntu you
+  want to support.
+
 ## Usage
 
 Move the mouse and a **☰ button** appears in the top-right corner; it (or
