@@ -50,6 +50,14 @@ struct App {
     error: Option<anyhow::Error>,
 }
 
+/// `--capture` progress.
+struct Capture {
+    path: PathBuf,
+    at: Instant,
+    total: u32,
+    done: u32,
+}
+
 struct State {
     window: Arc<Window>,
     gpu: Gpu,
@@ -62,8 +70,10 @@ struct State {
     cursor_hidden: bool,
     fps_window_start: Instant,
     fps_frames: u32,
-    /// `--capture`: where and when to save a frame.
-    capture: Option<(PathBuf, Instant)>,
+    /// `--capture`: what's left to save.
+    capture: Option<Capture>,
+    /// Set when the app should quit (capture finished or failed).
+    finished: Option<anyhow::Result<()>>,
     frame_interval: Duration,
     /// Ideal time of the next frame on a fixed timeline (not "now +
     /// interval", which would drift by however late each wakeup was).
@@ -99,12 +109,13 @@ impl State {
             cursor_hidden: false,
             fps_window_start: now,
             fps_frames: 0,
-            capture: opts.capture.clone().map(|p| {
-                (
-                    p,
-                    now + Duration::from_secs_f32(opts.capture_after.max(0.0)),
-                )
+            capture: opts.capture.clone().map(|path| Capture {
+                path,
+                at: now + Duration::from_secs_f32(opts.capture_after.max(0.0)),
+                total: opts.capture_frames.max(1),
+                done: 0,
             }),
+            finished: None,
             frame_interval: interval,
             next_frame: now,
             redraw_pending: true,
@@ -126,6 +137,7 @@ impl State {
             let time = (now - self.start).as_secs_f64();
             self.renderer
                 .render(&self.gpu, &view, &self.snap, time, dt, self.show_hud);
+            self.capture_if_due(&frame.texture, now);
             self.window.pre_present_notify();
             self.gpu.queue.present(frame);
             self.fps_frames += 1;
@@ -147,6 +159,30 @@ impl State {
             self.update_title(fps, &engine.status());
             self.fps_frames = 0;
             self.fps_window_start = Instant::now();
+        }
+    }
+
+    fn capture_if_due(&mut self, texture: &wgpu::Texture, now: Instant) {
+        let Some(cap) = self.capture.as_mut() else {
+            return;
+        };
+        if now < cap.at {
+            return;
+        }
+        let path = if cap.total == 1 {
+            cap.path.clone()
+        } else {
+            let stem = cap.path.with_extension("");
+            PathBuf::from(format!("{}_{:03}.ppm", stem.display(), cap.done))
+        };
+        if let Err(e) = capture::save_texture(&self.gpu, texture, &path) {
+            self.finished = Some(Err(e));
+            return;
+        }
+        eprintln!("saved {}", path.display());
+        cap.done += 1;
+        if cap.done == cap.total {
+            self.finished = Some(Ok(()));
         }
     }
 
@@ -224,21 +260,9 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 state.redraw(&self.engine);
-                if let Some((path, at)) = &state.capture
-                    && Instant::now() >= *at
-                {
-                    let time = state.start.elapsed().as_secs_f64();
-                    let result = capture::save_frame(
-                        &state.gpu,
-                        &mut state.renderer,
-                        &state.snap,
-                        time,
-                        state.show_hud,
-                        path,
-                    );
-                    match result {
-                        Ok(()) => eprintln!("saved {}", path.display()),
-                        Err(e) => self.error = Some(e),
+                if let Some(result) = state.finished.take() {
+                    if let Err(e) = result {
+                        self.error = Some(e);
                     }
                     event_loop.exit();
                 }

@@ -22,7 +22,16 @@ struct Globals {
     frame: u32,
     gain: f32,              // auto-gain reference mapped to 0..1 (HUD only)
     transition: f32,        // scene crossfade progress 0..1 (crossfade.wgsl)
-    _pad: f32,
+    // Slow versions (~1 s inertia): for things that should drift with the
+    // music's energy (zoom, brightness, detail) instead of following hits.
+    bass_slow: f32,
+    treble_slow: f32,
+    loudness_slow: f32,
+    _pad0: f32,
+    _pad1: f32,
+    // Two most recent "light waves" (started by strong beats, at most ~2/s):
+    // (age0 seconds, strength0, age1, strength1). Age is huge when unused.
+    waves: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;

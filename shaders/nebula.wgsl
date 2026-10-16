@@ -7,8 +7,14 @@
 // and filaments that look like gas clouds — and animating the inner
 // offsets makes them flow.
 //
-// Audio: bass drives brightness and zoom, treble the finest detail
-// octaves, beats send a soft ripple through the domain.
+// Audio, deliberately *slow*: domain warping amplifies any change of the
+// input coordinates, so feeding it fast-moving values (e.g. bass -> zoom)
+// makes the whole picture twitch on every hit. Instead:
+//  - slow bass   -> overall brightness, a warm core, a slight zoom;
+//  - slow treble -> weight of the finest detail octaves;
+//  - energy time -> flow speed and a slow rotation of the whole field;
+//  - strong beats -> soft waves of *light* travelling outwards through the
+//    gas (they illuminate it; the gas itself doesn't move).
 
 fn hash21(p: vec2<f32>) -> f32 {
     var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
@@ -45,34 +51,55 @@ fn fbm(p_in: vec2<f32>, fine: f32) -> f32 {
     return v;
 }
 
+// Sparse background stars: one candidate per grid cell, most cells empty.
+// Each star twinkles slowly (a gentle sine, never a blink).
+fn stars(p: vec2<f32>) -> f32 {
+    let cell = floor(p);
+    let h = hash21(cell);
+    if h < 0.92 {
+        return 0.0;
+    }
+    let pos = vec2<f32>(hash21(cell + 17.0), hash21(cell + 41.0));
+    let d = length(fract(p) - pos);
+    let twinkle = 0.7 + 0.3 * sin(g.time * (0.4 + h * 0.6) + h * 50.0);
+    return exp(-d * d * 500.0) * (h - 0.92) * 14.0 * twinkle;
+}
+
+// Brightness of a light wave `age` seconds old at radius r: a soft ring
+// expanding at 0.55 units/s, fading out over about a second.
+fn light_wave(r: f32, age: f32, strength: f32) -> f32 {
+    let front = age * 0.55;
+    let ring = exp(-pow((r - front) / 0.09, 2.0));
+    return strength * ring * exp(-age * 2.8);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let aspect = g.resolution.x / g.resolution.y;
-    var p = (in.uv - 0.5) * vec2<f32>(aspect, 1.0);
+    let screen = (in.uv - 0.5) * vec2<f32>(aspect, 1.0);
+    let r = length(screen);
 
-    let bass = mix(g.bass, 0.3 + 0.1 * sin(g.time * 0.3), g.idle);
+    let bass = mix(g.bass_slow, 0.3 + 0.1 * sin(g.time * 0.3), g.idle);
+    let fine = 0.35 + 0.8 * mix(g.treble_slow, 0.2, g.idle);
     let t = g.energy_time * 0.06;
-    let fine = 0.35 + 0.8 * mix(g.treble, 0.2, g.idle);
 
-    // Beats: a soft circular ripple pushing the domain outwards.
-    let r = length(p);
-    p += (p / max(r, 1e-4)) * g.beat * 0.025 * sin(r * 10.0 - g.time * 3.0);
+    // The whole field turns slowly, like looking up at a rotating sky.
+    let ang = g.energy_time * 0.015;
+    let cs = cos(ang);
+    let sn = sin(ang);
+    var p = mat2x2<f32>(cs, sn, -sn, cs) * screen;
+    p *= 1.9 - 0.2 * bass;
 
-    // Bass zooms in a little (bigger, closer clouds).
-    p *= 1.9 - 0.35 * bass;
-
-    let q = vec2<f32>(fbm(p + vec2<f32>(0.0, 0.0) + vec2<f32>(0.0, t), fine),
+    let q = vec2<f32>(fbm(p + vec2<f32>(0.0, t), fine),
                       fbm(p + vec2<f32>(5.2, 1.3) - vec2<f32>(t, 0.0), fine));
     let w = vec2<f32>(fbm(p + 3.5 * q + vec2<f32>(1.7, 9.2) + 0.6 * t, fine),
                       fbm(p + 3.5 * q + vec2<f32>(8.3, 2.8) - 0.4 * t, fine));
     let f = fbm(p + 3.5 * w, fine);
 
-    // Colouring: dark space, gas where the density is high, hot
-    // highlights where the warp is strongest, dark lanes between folds.
-    let drift = g.energy_time * 0.01;
     // Two neighbouring hues from a saturated rainbow palette (channels
     // 120° out of phase, so it never passes through grey); the dark
     // background is a tinted version of the gas colour.
+    let drift = g.energy_time * 0.01;
     let rainbow_a = vec3<f32>(0.5);
     let rainbow_b = vec3<f32>(0.5);
     let rainbow_d = vec3<f32>(0.0, 0.33, 0.67);
@@ -84,8 +111,18 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     c = mix(c, hot, clamp(dot(q, q) * 0.9 - 0.35, 0.0, 1.0) * dens);
     c = mix(c, c * 0.35, clamp(abs(w.x - 0.5) * 2.0, 0.0, 1.0) * 0.5);
 
-    // Density -> brightness (squared for contrast); bass lifts the cloud.
-    c *= dens * dens * (0.6 + 0.5 * bass + 0.08 * g.beat) * 1.6;
+    // Lighting: base level from the slow bass, a warm core in the middle,
+    // and the beat waves passing through. All multiply the gas density, so
+    // they light up existing clouds rather than painting shapes.
+    let core = exp(-r * r * 5.0) * (0.15 + 0.45 * bass);
+    let waves = light_wave(r, g.waves.x, g.waves.y) + light_wave(r, g.waves.z, g.waves.w);
+    let light = (0.55 + 0.45 * bass) + core + 0.9 * waves * mix(1.0, 0.6, g.calm);
+    c *= dens * dens * light * 1.5;
+
+    // Stars behind the gas: dimmed where the cloud is dense.
+    let star = stars(screen * 38.0 + vec2<f32>(g.energy_time * 0.05, 0.0));
+    c += vec3<f32>(0.9, 0.92, 1.0) * star * (1.0 - dens) * 0.6;
+
     // Darken towards the edges so it feels like looking into depth.
     c *= 1.0 - 0.4 * smoothstep(0.3, 0.9, r);
     return vec4<f32>(c, 1.0);

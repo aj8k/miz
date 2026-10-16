@@ -17,8 +17,9 @@ OPTIONS:
     --debug-audio              Print live analysis in the terminal instead of opening a window
     --scene <NAME>             Start scene: feedback (default), lissajous, radial, nebula, bass-pulse
     --hud                      Start with the debug HUD visible
-    --capture <FILE.ppm>       Save one frame after --capture-after seconds, then quit (dev tool)
+    --capture <FILE.ppm>       Save the frame shown after --capture-after seconds, then quit (dev tool)
     --capture-after <SECS>     Delay before --capture (default 4)
+    --capture-frames <N>       Save N consecutive frames as FILE_000.ppm, FILE_001.ppm, ...
     -h, --help                 Show this help
     -V, --version              Show version
 ";
@@ -31,6 +32,7 @@ pub struct Options {
     pub hud: bool,
     pub capture: Option<PathBuf>,
     pub capture_after: f32,
+    pub capture_frames: u32,
 }
 
 pub enum Command {
@@ -47,6 +49,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> 
         hud: false,
         capture: None,
         capture_after: 4.0,
+        capture_frames: 1,
     };
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -68,6 +71,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> 
             "--scene" => opts.scene = value("--scene")?,
             "--hud" => opts.hud = true,
             "--capture" => opts.capture = Some(PathBuf::from(value("--capture")?)),
+            "--capture-frames" => {
+                opts.capture_frames = value("--capture-frames")?
+                    .parse()
+                    .context("--capture-frames expects a count")?
+            }
             "--capture-after" => {
                 opts.capture_after = value("--capture-after")?
                     .parse()

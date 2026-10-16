@@ -82,6 +82,10 @@ impl Gpu {
         if config.format.is_srgb() {
             log::warn!("no linear swapchain format; colours will be slightly off");
         }
+        // Allow copying frames off the swapchain (for --capture).
+        if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
+            config.usage |= wgpu::TextureUsages::COPY_SRC;
+        }
         // Fifo = classic vsync: never tears, never renders frames nobody sees.
         config.present_mode = wgpu::PresentMode::Fifo;
         config.desired_maximum_frame_latency = 2;

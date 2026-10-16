@@ -1,5 +1,5 @@
-//! `--capture FILE.ppm`: render one frame offscreen and save it (dev tool,
-//! e.g. for checking a shader change without looking at the screen).
+//! `--capture FILE.ppm`: save the frame(s) shown on screen (dev tool, e.g.
+//! for checking a shader change without looking at the screen).
 //! PPM is a trivial uncompressed format; most image viewers open it.
 
 use std::io::Write;
@@ -9,43 +9,12 @@ use std::sync::mpsc;
 use anyhow::{Context, anyhow};
 
 use crate::gpu::Gpu;
-use crate::render::Renderer;
-use crate::snapshot::Snapshot;
 
-pub fn save_frame(
-    gpu: &Gpu,
-    renderer: &mut Renderer,
-    snap: &Snapshot,
-    time: f64,
-    show_hud: bool,
-    path: &Path,
-) -> anyhow::Result<()> {
-    let (w, h) = gpu.size();
-    let format = gpu.config.format;
-    let tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("capture"),
-        size: wgpu::Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    // dt = 0: re-render the current state without advancing animations.
-    renderer.render(
-        gpu,
-        &tex.create_view(&Default::default()),
-        snap,
-        time,
-        0.0,
-        show_hud,
-    );
-
+/// Copies `texture` (the swapchain image about to be presented, so the
+/// saved frame is exactly what's on screen) to the CPU and writes a PPM.
+pub fn save_texture(gpu: &Gpu, texture: &wgpu::Texture, path: &Path) -> anyhow::Result<()> {
+    let (w, h) = (texture.width(), texture.height());
+    let format = texture.format();
     // Buffer rows must be a multiple of 256 bytes for texture->buffer copies.
     let padded =
         (w * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -57,7 +26,7 @@ pub fn save_frame(
     });
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     encoder.copy_texture_to_buffer(
-        tex.as_image_copy(),
+        texture.as_image_copy(),
         wgpu::TexelCopyBufferInfo {
             buffer: &buf,
             layout: wgpu::TexelCopyBufferLayout {
