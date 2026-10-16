@@ -4,6 +4,10 @@ adopt-info: miz
 grade: stable
 confinement: strict
 license: MIT
+website: https://github.com/aj8k/miz
+source-code: https://github.com/aj8k/miz
+issues: https://github.com/aj8k/miz/issues
+contact: https://github.com/aj8k/miz/issues
 platforms:
   amd64:
 
