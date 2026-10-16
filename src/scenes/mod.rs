@@ -1,11 +1,14 @@
 //! Scenes: each one renders the music into an HDR texture.
 
-pub mod bass_pulse;
 pub mod feedback;
+pub mod lissajous;
+pub mod manager;
+pub mod shader;
 
 use anyhow::bail;
 
-use crate::gpu::Sampling;
+use crate::gpu::{Sampling, shaders};
+use shader::ShaderScene;
 
 /// Everything a scene needs to build its GPU resources.
 pub struct SceneInit<'a> {
@@ -22,10 +25,17 @@ pub struct SceneInit<'a> {
 pub struct SceneCtx<'a> {
     /// Group 0 of every pipeline: globals, bands, waveform (common.wgsl).
     pub audio_group: &'a wgpu::BindGroup,
+    /// Frame delta in seconds (also in the globals, for CPU-side use).
+    pub dt: f32,
 }
 
 pub trait Scene {
     fn name(&self) -> &'static str;
+
+    /// The scene is about to become visible again after a while. Scenes
+    /// with history (feedback, persistence) clear it here, so stale
+    /// frames from minutes ago don't flash up.
+    fn activate(&mut self) {}
 
     /// The render target changed size: reallocate size-dependent buffers.
     fn resize(&mut self, _device: &wgpu::Device, _sampling: &Sampling, _size: (u32, u32)) {}
@@ -39,13 +49,22 @@ pub trait Scene {
     );
 }
 
-/// Scene names accepted by `--scene`, in display order.
-pub const NAMES: &[&str] = &["feedback", "bass-pulse"];
+/// The scenes in rotation, in order (keys 1-4).
+pub const ROTATION: &[&str] = &["feedback", "lissajous", "radial", "nebula"];
+/// Accepted by `--scene` but not part of the rotation.
+pub const EXTRA: &[&str] = &["bass-pulse"];
 
 pub fn create(name: &str, init: &SceneInit) -> anyhow::Result<Box<dyn Scene>> {
     Ok(match name {
         "feedback" => Box::new(feedback::Feedback::new(init)),
-        "bass-pulse" => Box::new(bass_pulse::BassPulse::new(init)),
-        other => bail!("unknown scene '{other}' (available: {})", NAMES.join(", ")),
+        "lissajous" => Box::new(lissajous::Lissajous::new(init)),
+        "radial" => Box::new(ShaderScene::new(init, "radial spectrum", shaders::RADIAL)),
+        "nebula" => Box::new(ShaderScene::new(init, "nebula", shaders::NEBULA)),
+        "bass-pulse" => Box::new(ShaderScene::new(init, "bass pulse", shaders::BASS_PULSE)),
+        other => bail!(
+            "unknown scene '{other}' (available: {}, {})",
+            ROTATION.join(", "),
+            EXTRA.join(", ")
+        ),
     })
 }

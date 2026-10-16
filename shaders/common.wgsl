@@ -21,8 +21,8 @@ struct Globals {
     beat_count: u32,
     frame: u32,
     gain: f32,              // auto-gain reference mapped to 0..1 (HUD only)
-    _pad0: f32,
-    _pad1: f32,
+    transition: f32,        // scene crossfade progress 0..1 (crossfade.wgsl)
+    _pad: f32,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;

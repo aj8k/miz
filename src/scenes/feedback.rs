@@ -19,6 +19,8 @@ pub struct Feedback {
     groups: [wgpu::BindGroup; 2],
     /// Index of the buffer holding the most recent frame.
     latest: usize,
+    /// Clear the history before the next frame (see `Scene::activate`).
+    needs_clear: bool,
     warp: wgpu::RenderPipeline,
     wave: wgpu::RenderPipeline,
     display: wgpu::RenderPipeline,
@@ -57,6 +59,7 @@ impl Feedback {
             buffers,
             groups,
             latest: 0,
+            needs_clear: false,
             warp,
             wave,
             display,
@@ -85,6 +88,10 @@ impl Scene for Feedback {
         "feedback warp"
     }
 
+    fn activate(&mut self) {
+        self.needs_clear = true;
+    }
+
     fn resize(&mut self, device: &wgpu::Device, sampling: &Sampling, size: (u32, u32)) {
         // Starting from black after a resize is fine: the image rebuilds
         // itself within a second or two.
@@ -100,6 +107,16 @@ impl Scene for Feedback {
     ) {
         let prev = self.latest;
         let next = 1 - prev;
+        if self.needs_clear {
+            // An empty pass whose only job is its Clear load op.
+            gpu::color_pass(
+                encoder,
+                "feedback clear",
+                &self.buffers[prev].view,
+                Some(wgpu::Color::BLACK),
+            );
+            self.needs_clear = false;
+        }
 
         // 1+2. Warp the previous frame into the other buffer, then add the
         // fresh waveform on top (same pass: same target, different pipeline).

@@ -3,7 +3,8 @@
 pub mod params;
 
 use crate::gpu::{self, Gpu, HdrTarget, Sampling, shaders};
-use crate::scenes::{self, Scene, SceneCtx, SceneInit};
+use crate::scenes::manager::SceneManager;
+use crate::scenes::{SceneCtx, SceneInit};
 use crate::snapshot::{MAX_BANDS, Snapshot, WAVE_LEN};
 use params::{FrameParams, Globals};
 
@@ -98,7 +99,7 @@ impl AudioBuffers {
 pub struct Renderer {
     audio: AudioBuffers,
     params: FrameParams,
-    scene: Box<dyn Scene>,
+    scenes: SceneManager,
     scene_target: HdrTarget,
     /// Internal resolution relative to the window (0.5..1.0).
     render_scale: f32,
@@ -144,12 +145,12 @@ impl Renderer {
             sampling: &sampling,
             size: scene_target.size,
         };
-        let scene = scenes::create(scene_name, &init)?;
+        let scenes = SceneManager::new(&init, scene_name)?;
 
         Ok(Self {
             audio,
             params: FrameParams::new(),
-            scene,
+            scenes,
             scene_target,
             render_scale,
             sampling,
@@ -159,8 +160,16 @@ impl Renderer {
         })
     }
 
+    pub fn scenes(&mut self) -> &mut SceneManager {
+        &mut self.scenes
+    }
+
     pub fn scene_name(&self) -> &'static str {
-        self.scene.name()
+        self.scenes.name()
+    }
+
+    pub fn scenes_locked(&self) -> bool {
+        self.scenes.locked()
     }
 
     /// Reallocates size-dependent targets after the window was resized.
@@ -171,7 +180,7 @@ impl Renderer {
         }
         self.scene_target = HdrTarget::new(&gpu.device, "scene", size);
         self.present_group = self.sampling.bind(&gpu.device, &self.scene_target.view);
-        self.scene.resize(&gpu.device, &self.sampling, size);
+        self.scenes.resize(&gpu.device, &self.sampling, size);
     }
 
     pub fn render(
@@ -187,7 +196,9 @@ impl Renderer {
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
 
         // 1. Upload this frame's audio data (scenes see the scene-target size).
+        let transition = self.scenes.update(time);
         self.params.update(snap, time, dt, self.scene_target.size);
+        self.params.globals.transition = transition;
         queue.write_buffer(
             &self.audio.globals,
             0,
@@ -203,8 +214,9 @@ impl Renderer {
         // 2. Scene into the HDR target.
         let ctx = SceneCtx {
             audio_group: &self.audio.group,
+            dt,
         };
-        self.scene
+        self.scenes
             .render(&ctx, &mut encoder, &self.scene_target.view);
 
         // 3. Present + HUD into the swapchain image, at window resolution.

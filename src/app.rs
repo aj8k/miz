@@ -151,7 +151,12 @@ impl State {
     }
 
     fn update_title(&self, fps: f32, status: &AudioStatus) {
-        let mut title = format!("miz — {} — {fps:.0} fps", self.renderer.scene_name());
+        let lock = if self.renderer.scenes_locked() {
+            " [locked]"
+        } else {
+            ""
+        };
+        let mut title = format!("miz — {}{lock} — {fps:.0} fps", self.renderer.scene_name());
         if self.show_hud {
             title += &format!(" — gain {:.0} dB", self.snap.gain_db);
         }
@@ -254,10 +259,19 @@ impl ApplicationHandler for App {
             } => {
                 // Physical keys: shortcuts stay where they are regardless of
                 // the active keyboard layout (e.g. Ukrainian).
+                let time = state.start.elapsed().as_secs_f64();
+                let scenes = state.renderer.scenes();
                 match code {
                     KeyCode::KeyQ | KeyCode::Escape => event_loop.exit(),
                     KeyCode::KeyF => state.toggle_fullscreen(),
                     KeyCode::KeyH => state.show_hud = !state.show_hud,
+                    KeyCode::KeyN => scenes.next(time),
+                    KeyCode::KeyP => scenes.prev(time),
+                    KeyCode::KeyL => scenes.toggle_lock(),
+                    KeyCode::Digit1 => scenes.jump(0, time),
+                    KeyCode::Digit2 => scenes.jump(1, time),
+                    KeyCode::Digit3 => scenes.jump(2, time),
+                    KeyCode::Digit4 => scenes.jump(3, time),
                     _ => {}
                 }
             }

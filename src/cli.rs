@@ -15,7 +15,7 @@ USAGE:
 OPTIONS:
     --source <pipewire|test>   Audio input (default: pipewire = monitor of the default output)
     --debug-audio              Print live analysis in the terminal instead of opening a window
-    --scene <NAME>             Scene to show: feedback (default), bass-pulse
+    --scene <NAME>             Start scene: feedback (default), lissajous, radial, nebula, bass-pulse
     --hud                      Start with the debug HUD visible
     --capture <FILE.ppm>       Save one frame after --capture-after seconds, then quit (dev tool)
     --capture-after <SECS>     Delay before --capture (default 4)

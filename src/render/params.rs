@@ -28,7 +28,8 @@ pub struct Globals {
     pub beat_count: u32,
     pub frame: u32,
     pub gain: f32,
-    pub _pad: [f32; 2],
+    pub transition: f32,
+    pub _pad: f32,
 }
 
 /// Audio data arrives in bursts (one PipeWire quantum ≈ 21 ms), so a 60 FPS
