@@ -117,9 +117,8 @@ impl AudioEngine {
         })
     }
 
-    /// Applies new settings (config reload). Only actual changes are sent:
-    /// a new analyzer starts from scratch (auto-gain, smoothing), and a new
-    /// source restarts capture.
+    /// Applies new settings (config reload, menu). Only actual changes are
+    /// sent; a new source restarts capture.
     pub fn reconfigure(&mut self, kind: SourceKind, cfg: AnalyzerConfig) {
         if self.current == (kind, cfg.clone()) {
             return;
@@ -222,7 +221,7 @@ impl Worker {
     fn apply_settings(&mut self) -> bool {
         let mut source_changed = false;
         while let Ok((kind, cfg)) = self.settings.try_recv() {
-            self.analyzer = Analyzer::new(cfg);
+            self.analyzer.reconfigure(cfg);
             source_changed |= kind != self.kind;
             self.kind = kind;
         }

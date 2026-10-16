@@ -102,12 +102,6 @@ impl FrameParams {
         self.calm_target = if calm { 1.0 } else { 0.0 };
     }
 
-    /// Returns the new state (true = calm).
-    pub fn toggle_calm(&mut self) -> bool {
-        self.calm_target = 1.0 - self.calm_target;
-        self.calm_target > 0.5
-    }
-
     pub fn calm(&self) -> bool {
         self.calm_target > 0.5
     }

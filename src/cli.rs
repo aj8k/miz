@@ -19,6 +19,7 @@ OPTIONS:
     --dev                      Load shaders from the source tree and reload them on save
     --debug-audio              Print live analysis in the terminal instead of opening a window
     --hud                      Start with the debug HUD visible
+    --menu                     Start with the settings menu open
     --capture <FILE.ppm>       Save the frame shown after --capture-after seconds, then quit (dev tool)
     --capture-after <SECS>     Delay before --capture (default 4)
     --capture-frames <N>       Save N consecutive frames as FILE_000.ppm, FILE_001.ppm, ...
@@ -29,6 +30,7 @@ KEYS:
     F          fullscreen          N / P      next / previous scene
     H          debug HUD           1 - 4      jump to scene
     C          calm mode on/off    L          lock the current scene
+    M          settings menu (also right-click or the ☰ button)
     Q / Esc    quit
 ";
 
@@ -41,6 +43,7 @@ pub struct Options {
     pub dev: bool,
     pub debug_audio: bool,
     pub hud: bool,
+    pub menu: bool,
     pub capture: Option<PathBuf>,
     pub capture_after: f32,
     pub capture_frames: u32,
@@ -60,6 +63,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> 
         dev: false,
         debug_audio: false,
         hud: false,
+        menu: false,
         capture: None,
         capture_after: 4.0,
         capture_frames: 1,
@@ -85,6 +89,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> 
             "--config" => opts.config = Some(PathBuf::from(value("--config")?)),
             "--dev" => opts.dev = true,
             "--hud" => opts.hud = true,
+            "--menu" => opts.menu = true,
             "--capture" => opts.capture = Some(PathBuf::from(value("--capture")?)),
             "--capture-frames" => {
                 opts.capture_frames = value("--capture-frames")?

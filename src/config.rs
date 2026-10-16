@@ -38,8 +38,10 @@ gain_decay_db_per_s = 2.0
 calm = true
 # Scene at startup: feedback, lissajous, radial, nebula (or bass-pulse).
 scene = "feedback"
-# Switch to the next scene every N minutes (0 = never). L locks at runtime.
+# Switch to the next scene every N minutes (0 = never).
 rotate_minutes = 5.0
+# Stay on the current scene (no auto-rotation). Toggle at runtime with L.
+lock = false
 crossfade_seconds = 4.0
 # Internal resolution relative to the window (0.25..1.0); lower = lighter GPU load.
 render_scale = 1.0
@@ -48,6 +50,8 @@ render_scale = 1.0
 target_fps = 60.0
 # "low-power" (integrated GPU) or "high-performance". Needs a restart.
 gpu = "low-power"
+# Start in fullscreen. Toggle at runtime with F.
+fullscreen = false
 
 [safety]
 # Maximum change of the picture's average brightness, as a fraction of
@@ -92,10 +96,12 @@ pub struct Visual {
     pub calm: bool,
     pub scene: String,
     pub rotate_minutes: f32,
+    pub lock: bool,
     pub crossfade_seconds: f32,
     pub render_scale: f32,
     pub target_fps: f32,
     pub gpu: String,
+    pub fullscreen: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -132,10 +138,12 @@ impl Default for Visual {
             calm: true,
             scene: "feedback".into(),
             rotate_minutes: 5.0,
+            lock: false,
             crossfade_seconds: 4.0,
             render_scale: 1.0,
             target_fps: 60.0,
             gpu: "low-power".into(),
+            fullscreen: false,
         }
     }
 }
@@ -304,6 +312,104 @@ pub fn load(path: &Path) -> anyhow::Result<Config> {
     Ok(cfg)
 }
 
+/// Writes `cfg` to `path`, keeping the file's comments and layout: values
+/// are replaced in place in the existing TOML document (the template if the
+/// file is missing or unreadable). Written atomically (temp file + rename),
+/// so a crash can't leave a half-written config.
+pub fn save(path: &Path, cfg: &Config) -> anyhow::Result<()> {
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let mut doc: toml_edit::DocumentMut = match existing.parse() {
+        Ok(doc) if !existing.trim().is_empty() => doc,
+        _ => TEMPLATE.parse().context("parsing the built-in template")?,
+    };
+    let a = &cfg.audio;
+    set(&mut doc, "audio", "source", a.source.as_str().into());
+    set(&mut doc, "audio", "bands", (a.bands as i64).into());
+    set(
+        &mut doc,
+        "audio",
+        "tilt_db_per_octave",
+        float(a.tilt_db_per_octave),
+    );
+    set(&mut doc, "audio", "range_db", float(a.range_db));
+    set(&mut doc, "audio", "attack_ms", float(a.attack_ms));
+    set(&mut doc, "audio", "release_ms", float(a.release_ms));
+    set(
+        &mut doc,
+        "audio",
+        "gain_decay_db_per_s",
+        float(a.gain_decay_db_per_s),
+    );
+    let v = &cfg.visual;
+    set(&mut doc, "visual", "calm", v.calm.into());
+    set(&mut doc, "visual", "scene", v.scene.as_str().into());
+    set(
+        &mut doc,
+        "visual",
+        "rotate_minutes",
+        float(v.rotate_minutes),
+    );
+    set(&mut doc, "visual", "lock", v.lock.into());
+    set(
+        &mut doc,
+        "visual",
+        "crossfade_seconds",
+        float(v.crossfade_seconds),
+    );
+    set(&mut doc, "visual", "render_scale", float(v.render_scale));
+    set(&mut doc, "visual", "target_fps", float(v.target_fps));
+    set(&mut doc, "visual", "gpu", v.gpu.as_str().into());
+    set(&mut doc, "visual", "fullscreen", v.fullscreen.into());
+    let s = &cfg.safety;
+    set(
+        &mut doc,
+        "safety",
+        "max_brightness_rate",
+        float(s.max_brightness_rate),
+    );
+    set(
+        &mut doc,
+        "safety",
+        "calm_max_brightness_rate",
+        float(s.calm_max_brightness_rate),
+    );
+    set(
+        &mut doc,
+        "dev",
+        "shader_dir",
+        cfg.dev.shader_dir.as_str().into(),
+    );
+
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, doc.to_string()).with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
+    Ok(())
+}
+
+/// f32 -> TOML float without binary noise (0.12f32 would print as
+/// 0.11999999731779099).
+fn float(v: f32) -> toml_edit::Value {
+    let rounded: f64 = format!("{v:.4}").parse().unwrap_or(f64::from(v));
+    rounded.into()
+}
+
+/// Sets `[table] key = value`, keeping the existing value's decoration
+/// (e.g. a trailing `# comment`); creates the table/key if missing.
+fn set(doc: &mut toml_edit::DocumentMut, table: &str, key: &str, value: toml_edit::Value) {
+    let item = &mut doc[table][key];
+    match item.as_value_mut() {
+        Some(old) => {
+            let decor = old.decor().clone();
+            *old = value;
+            *old.decor_mut() = decor;
+        }
+        None => *item = toml_edit::Item::Value(value),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,6 +427,26 @@ mod tests {
         assert!(!cfg.visual.calm);
         assert_eq!(cfg.audio, Audio::default());
         assert!(Config::parse("[visual]\ncalmm = false\n").is_err());
+    }
+
+    #[test]
+    fn save_keeps_comments_and_round_trips() {
+        let dir = std::env::temp_dir().join(format!("miz-config-test-{}", std::process::id()));
+        let path = dir.join("config.toml");
+        // Missing file: saving defaults reproduces the template exactly.
+        save(&path, &Config::default()).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), TEMPLATE);
+
+        let mut cfg = Config::default();
+        cfg.visual.calm = false;
+        cfg.visual.scene = "nebula".into();
+        cfg.safety.calm_max_brightness_rate = 0.07;
+        save(&path, &cfg).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(text.contains("# Calm mode: slower, softer, dimmer."));
+        assert!(text.contains("calm_max_brightness_rate = 0.07\n"));
+        assert_eq!(Config::parse(&text).unwrap().0, cfg);
     }
 
     #[test]

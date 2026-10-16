@@ -20,6 +20,8 @@ pub struct SceneManager {
     locked: bool,
     /// Time (seconds since start) of the last switch, for auto-rotation.
     last_switch: f64,
+    /// Set by `set_locked`; `update` resets `last_switch` then.
+    lock_changed: bool,
     rotate_every_s: f64,
     fade_s: f64,
     /// During a fade both scenes render into these, then get blended.
@@ -67,6 +69,7 @@ impl SceneManager {
             fade: None,
             locked: false,
             last_switch: 0.0,
+            lock_changed: false,
             rotate_every_s: 5.0 * 60.0,
             fade_s: 4.0,
             slots,
@@ -103,8 +106,23 @@ impl SceneManager {
         self.locked
     }
 
-    pub fn toggle_lock(&mut self) {
-        self.locked = !self.locked;
+    pub fn set_locked(&mut self, locked: bool) {
+        if locked != self.locked {
+            self.locked = locked;
+            // Unlocking starts a fresh rotation interval instead of
+            // switching immediately because the old one has run out.
+            self.lock_changed = true;
+        }
+    }
+
+    /// Index of the current scene in `keys()` order.
+    pub fn current(&self) -> usize {
+        self.current
+    }
+
+    /// Display names of all scenes, in key order (1-4 = rotation).
+    pub fn names(&self) -> Vec<&'static str> {
+        self.scenes.iter().map(|s| s.name()).collect()
     }
 
     pub fn next(&mut self, time: f64) {
@@ -149,6 +167,10 @@ impl SceneManager {
 
     /// Advances fades and auto-rotation; returns the crossfade progress.
     pub fn update(&mut self, time: f64) -> f32 {
+        if self.lock_changed {
+            self.lock_changed = false;
+            self.last_switch = time;
+        }
         if let Some(f) = &self.fade
             && time - f.start >= self.fade_s
         {

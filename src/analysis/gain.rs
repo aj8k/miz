@@ -35,6 +35,10 @@ impl AutoGain {
         self.level_db
     }
 
+    pub fn set_decay(&mut self, decay_db_per_s: f32) {
+        self.decay_db_per_s = decay_db_per_s;
+    }
+
     /// Feeds the current peak (dB). With `hold` set (e.g. during silence)
     /// the reference does not decay, so music resumes at the old scale.
     pub fn update(&mut self, peak_db: f32, dt: f32, hold: bool) {

@@ -169,6 +169,32 @@ impl Analyzer {
         }
     }
 
+    /// Applies new settings without starting from scratch: auto-gain,
+    /// smoothing state and the idle level carry over, so dragging a
+    /// setting doesn't make the visuals drop into their idle animation.
+    pub fn reconfigure(&mut self, cfg: AnalyzerConfig) {
+        let layout_changed = cfg.bands.clamp(8, MAX_BANDS) != self.cfg.bands
+            || cfg.f_min != self.cfg.f_min
+            || cfg.f_max != self.cfg.f_max
+            || cfg.tilt_db_per_octave != self.cfg.tilt_db_per_octave;
+        if layout_changed {
+            // Band arrays and the onset detector depend on the layout:
+            // rebuild, then carry the slow-moving state over.
+            let old = std::mem::replace(self, Analyzer::new(cfg));
+            self.gain = old.gain;
+            self.wave_gain = old.wave_gain;
+            self.ring = old.ring;
+            self.silent_for_s = old.silent_for_s;
+            let band_count = self.snap.band_count;
+            self.snap = old.snap;
+            self.snap.band_count = band_count;
+        } else {
+            self.cfg = cfg;
+        }
+        self.gain.set_decay(self.cfg.gain_decay_db_per_s);
+        self.wave_gain.set_decay(self.cfg.gain_decay_db_per_s);
+    }
+
     pub fn snapshot(&self) -> &Snapshot {
         &self.snap
     }
@@ -425,6 +451,26 @@ mod tests {
         feed(&mut a, 1.0, 8.0, sine(300.0, 0.4));
         assert_eq!(a.snapshot().beat_count, after_attack);
         assert!(a.snapshot().beat < 0.01);
+    }
+
+    #[test]
+    fn reconfigure_keeps_state() {
+        let mut a = Analyzer::new(AnalyzerConfig::default());
+        feed(&mut a, 0.0, 2.0, sine(440.0, 0.5));
+        let gain = a.snapshot().gain_db;
+        // A smoothing-only change and a layout change: neither resets.
+        a.reconfigure(AnalyzerConfig {
+            range_db: 40.0,
+            ..AnalyzerConfig::default()
+        });
+        a.reconfigure(AnalyzerConfig {
+            bands: 32,
+            ..AnalyzerConfig::default()
+        });
+        assert_eq!(a.snapshot().band_count, 32);
+        assert!(a.snapshot().idle < 0.05, "fell into idle");
+        feed(&mut a, 2.0, 0.1, sine(440.0, 0.5));
+        assert!((a.snapshot().gain_db - gain).abs() < 1.0);
     }
 
     #[test]

@@ -229,6 +229,7 @@ impl Renderer {
     /// Applies the live-reloadable parts of the config.
     pub fn apply_config(&mut self, gpu: &Gpu, cfg: &Config) {
         self.params.set_calm(cfg.visual.calm);
+        self.p.scenes.set_locked(cfg.visual.lock);
         self.params.set_safety(
             cfg.safety.max_brightness_rate,
             cfg.safety.calm_max_brightness_rate,
@@ -241,10 +242,6 @@ impl Renderer {
             self.render_scale = cfg.visual.render_scale;
             self.resize(gpu);
         }
-    }
-
-    pub fn toggle_calm(&mut self) -> bool {
-        self.params.toggle_calm()
     }
 
     pub fn calm(&self) -> bool {
@@ -261,6 +258,11 @@ impl Renderer {
 
     pub fn scenes_locked(&self) -> bool {
         self.p.scenes.locked()
+    }
+
+    /// Registry key of the current scene, e.g. "nebula" (saved as start scene).
+    pub fn scene_key(&self) -> &str {
+        self.p.scenes.current_key()
     }
 
     /// Reallocates size-dependent targets after the window was resized.

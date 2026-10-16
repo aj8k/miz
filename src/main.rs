@@ -9,6 +9,7 @@ mod cli;
 mod config;
 mod debug_term;
 mod gpu;
+mod menu;
 mod render;
 mod scenes;
 mod snapshot;

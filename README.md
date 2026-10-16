@@ -13,8 +13,9 @@ that react to whatever your system is playing — Spotify, a browser, anything.
   with PipeWire.
 - Calm mode by default, and a GPU **photosensitivity limiter** in every mode:
   the picture's average brightness can't change fast enough to flash.
-- Rust + wgpu (Vulkan), ~12% of one CPU core at 72 fps on a laptop iGPU,
-  half the frame rate when nothing is playing.
+- Rust + wgpu (Vulkan), ~13% of one CPU core at 72 fps on a laptop iGPU,
+  half the frame rate when nothing is playing. A small settings menu (egui)
+  for everything that has a shortcut or a config option.
 
 ## Build and install
 
@@ -33,10 +34,19 @@ scripts/install.sh --uninstall
 
 ## Usage
 
+Move the mouse and a **☰ button** appears in the top-right corner; it (or
+`M`, or a right-click) opens the settings menu: scene, auto-rotation, calm
+mode, fullscreen, quality, audio source and sensitivity, flash-safety limits.
+Changes apply immediately; **Save as default** writes them (and the current
+scene) to the config file, keeping its comments.
+
+![Settings menu over the nebula scene](docs/menu.jpg)
+
 ```sh
 miz                      # visualize the default output
 miz --source test        # built-in synthetic music (no PipeWire needed)
 miz --scene nebula --hud
+miz --menu               # start with the settings menu open
 miz --debug-audio        # terminal dashboard of the audio analysis, no window
 miz --dev                # load shaders from the source tree, reload on save
 miz --help
@@ -44,13 +54,14 @@ miz --help
 
 | Key | Action |
 |---|---|
+| `M` | settings menu (also right-click or the ☰ button) |
 | `F` | fullscreen (the cursor hides after 3 s) |
 | `N` / `P` | next / previous scene (4 s crossfade) |
 | `1`–`4` | feedback warp, stereo scope, radial spectrum, nebula |
 | `L` | lock the current scene (no auto-rotation) |
 | `C` | calm mode on/off |
 | `H` | debug HUD; FPS and gain are in the window title |
-| `Q` / `Esc` | quit |
+| `Q` / `Esc` | quit (`Esc` closes the menu first) |
 
 Shortcuts use physical key positions, so they work with any keyboard layout.
 
@@ -64,7 +75,8 @@ corner is the beat pulse.
 `~/.config/miz/config.toml` is created on first run with every option
 documented. Edits apply while miz is running (except `gpu`); a file with an
 error is rejected and the previous settings stay. `--source` and `--scene`
-on the command line override the file.
+on the command line override the file. The menu's **Save as default** writes
+here too.
 
 ```toml
 [audio]
@@ -80,10 +92,12 @@ gain_decay_db_per_s = 2.0    # auto-gain recovery speed
 calm = true                  # start in calm mode
 scene = "feedback"           # feedback, lissajous, radial, nebula, bass-pulse
 rotate_minutes = 5.0         # 0 = never
+lock = false                 # stay on the current scene (L)
 crossfade_seconds = 4.0
 render_scale = 1.0           # 0.25..1.0 internal resolution
 target_fps = 60.0            # actual rate = refresh / N closest to this
 gpu = "low-power"            # or "high-performance" (needs restart)
+fullscreen = false           # start in fullscreen (F)
 
 [safety]
 max_brightness_rate = 0.25       # can be lowered, never raised
@@ -159,7 +173,8 @@ src/
   render/     frame params (uniforms), safety limiter, frame graph
   scenes/     feedback, scope, shader scenes, scene manager (crossfades)
   gpu/        device/surface, pipelines, shader library (naga validation)
-  app.rs      window, keys, frame pacing, hot reload
+  app.rs      window, keys, frame pacing, hot reload, applying settings
+  menu.rs     settings menu (egui, immediate mode)
   config.rs   config file
 shaders/      WGSL; common.wgsl is prepended to every shader
 ```
