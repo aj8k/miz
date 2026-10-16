@@ -8,8 +8,19 @@ license = "MIT"
 [dependencies]
 # Error type with context for startup / top-level failures.
 anyhow = "1"
+# Safe casting of #[repr(C)] uniform structs and sample arrays to bytes.
+bytemuck = { version = "1", features = ["derive"] }
+# Logging facade (wgpu reports through it) + RUST_LOG-controlled backend.
+env_logger = "0.11"
+log = "0.4"
+# Tiny block_on for wgpu's async adapter/device requests.
+pollster = "1"
 # FFT for the spectrum analysis (pure Rust, SIMD-accelerated).
 rustfft = "6.4"
+# GPU rendering. Only the backends that matter on Linux: Vulkan, with GL as fallback.
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "vulkan", "gles", "wgsl"] }
+# Window + input; talks to Wayland/X11 via dlopen, so no dev headers needed.
+winit = "0.30"
 
 [profile.release]
 lto = "thin"

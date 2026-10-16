@@ -12,7 +12,7 @@
 mod bands;
 mod gain;
 mod onset;
-mod smooth;
+pub mod smooth;
 
 use std::sync::Arc;
 

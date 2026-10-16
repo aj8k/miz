@@ -1,5 +1,7 @@
 //! Command-line parsing (a handful of flags; no parser crate needed).
 
+use std::path::PathBuf;
+
 use anyhow::{Context, bail};
 
 use crate::audio::SourceKind;
@@ -13,6 +15,9 @@ USAGE:
 OPTIONS:
     --source <pipewire|test>   Audio input (default: pipewire = monitor of the default output)
     --debug-audio              Print live analysis in the terminal instead of opening a window
+    --hud                      Start with the debug HUD visible
+    --capture <FILE.ppm>       Save one frame after --capture-after seconds, then quit (dev tool)
+    --capture-after <SECS>     Delay before --capture (default 4)
     -h, --help                 Show this help
     -V, --version              Show version
 ";
@@ -21,6 +26,9 @@ OPTIONS:
 pub struct Options {
     pub source: SourceKind,
     pub debug_audio: bool,
+    pub hud: bool,
+    pub capture: Option<PathBuf>,
+    pub capture_after: f32,
 }
 
 pub enum Command {
@@ -33,6 +41,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> 
     let mut opts = Options {
         source: SourceKind::PipeWire,
         debug_audio: false,
+        hud: false,
+        capture: None,
+        capture_after: 4.0,
     };
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -51,6 +62,13 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> 
             "-h" | "--help" => return Ok(Command::Help),
             "-V" | "--version" => return Ok(Command::Version),
             "--debug-audio" => opts.debug_audio = true,
+            "--hud" => opts.hud = true,
+            "--capture" => opts.capture = Some(PathBuf::from(value("--capture")?)),
+            "--capture-after" => {
+                opts.capture_after = value("--capture-after")?
+                    .parse()
+                    .context("--capture-after expects seconds")?
+            }
             "--source" => {
                 opts.source = match value("--source")?.as_str() {
                     "pipewire" | "pw" => SourceKind::PipeWire,

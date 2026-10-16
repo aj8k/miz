@@ -2,9 +2,14 @@
 #![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used))]
 
 mod analysis;
+mod app;
 mod audio;
+mod capture;
 mod cli;
 mod debug_term;
+mod gpu;
+mod render;
+mod scenes;
 mod snapshot;
 
 use analysis::AnalyzerConfig;
@@ -12,6 +17,7 @@ use audio::AudioEngine;
 use cli::Command;
 
 fn main() -> anyhow::Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let opts = match cli::parse(std::env::args().skip(1))? {
         Command::Help => {
             print!("{}", cli::USAGE);
@@ -28,5 +34,5 @@ fn main() -> anyhow::Result<()> {
     if opts.debug_audio {
         return debug_term::run(&engine);
     }
-    anyhow::bail!("the window comes in phase 2 — for now run with --debug-audio")
+    app::run(engine, opts)
 }
