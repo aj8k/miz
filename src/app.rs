@@ -83,7 +83,7 @@ impl State {
                 .context("creating the window")?,
         );
         let gpu = Gpu::new(event_loop, Arc::clone(&window))?;
-        let renderer = Renderer::new(&gpu);
+        let renderer = Renderer::new(&gpu, &opts.scene)?;
         let now = Instant::now();
         let interval = frame_interval(&window);
         log::info!("frame interval {:.2} ms", interval.as_secs_f64() * 1e3);

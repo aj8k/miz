@@ -6,6 +6,9 @@ const COMMON: &str = include_str!("../../shaders/common.wgsl");
 pub const BASS_PULSE: &str = include_str!("../../shaders/bass_pulse.wgsl");
 pub const PRESENT: &str = include_str!("../../shaders/present.wgsl");
 pub const HUD: &str = include_str!("../../shaders/hud.wgsl");
+pub const FEEDBACK_WARP: &str = include_str!("../../shaders/feedback_warp.wgsl");
+pub const FEEDBACK_WAVE: &str = include_str!("../../shaders/feedback_wave.wgsl");
+pub const FEEDBACK_DISPLAY: &str = include_str!("../../shaders/feedback_display.wgsl");
 
 pub fn compile(device: &wgpu::Device, label: &str, source: &str) -> wgpu::ShaderModule {
     let full = format!("{COMMON}\n{source}");

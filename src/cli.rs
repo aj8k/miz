@@ -15,6 +15,7 @@ USAGE:
 OPTIONS:
     --source <pipewire|test>   Audio input (default: pipewire = monitor of the default output)
     --debug-audio              Print live analysis in the terminal instead of opening a window
+    --scene <NAME>             Scene to show: feedback (default), bass-pulse
     --hud                      Start with the debug HUD visible
     --capture <FILE.ppm>       Save one frame after --capture-after seconds, then quit (dev tool)
     --capture-after <SECS>     Delay before --capture (default 4)
@@ -26,6 +27,7 @@ OPTIONS:
 pub struct Options {
     pub source: SourceKind,
     pub debug_audio: bool,
+    pub scene: String,
     pub hud: bool,
     pub capture: Option<PathBuf>,
     pub capture_after: f32,
@@ -41,6 +43,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> 
     let mut opts = Options {
         source: SourceKind::PipeWire,
         debug_audio: false,
+        scene: "feedback".into(),
         hud: false,
         capture: None,
         capture_after: 4.0,
@@ -62,6 +65,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> 
             "-h" | "--help" => return Ok(Command::Help),
             "-V" | "--version" => return Ok(Command::Version),
             "--debug-audio" => opts.debug_audio = true,
+            "--scene" => opts.scene = value("--scene")?,
             "--hud" => opts.hud = true,
             "--capture" => opts.capture = Some(PathBuf::from(value("--capture")?)),
             "--capture-after" => {

@@ -147,12 +147,49 @@ impl Gpu {
     }
 }
 
+/// Additive blending: result = destination + source. Used for light-like
+/// things (lines, glows) drawn on top of an existing image.
+pub const ADDITIVE: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+};
+
 /// Creates a pipeline that draws the fullscreen triangle from common.wgsl
 /// with `fs_main` from `module`.
 pub fn fullscreen_pipeline(
     device: &wgpu::Device,
     label: &str,
     module: &wgpu::ShaderModule,
+    layouts: &[&wgpu::BindGroupLayout],
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+) -> wgpu::RenderPipeline {
+    pipeline(
+        device,
+        label,
+        module,
+        "vs_fullscreen",
+        layouts,
+        format,
+        blend,
+    )
+}
+
+/// A pipeline with no vertex buffers (vertex shaders compute positions from
+/// `vertex_index`), triangle lists, `fs_main` as the fragment entry point.
+pub fn pipeline(
+    device: &wgpu::Device,
+    label: &str,
+    module: &wgpu::ShaderModule,
+    vertex_entry: &str,
     layouts: &[&wgpu::BindGroupLayout],
     format: wgpu::TextureFormat,
     blend: Option<wgpu::BlendState>,
@@ -168,7 +205,7 @@ pub fn fullscreen_pipeline(
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module,
-            entry_point: Some("vs_fullscreen"),
+            entry_point: Some(vertex_entry),
             compilation_options: Default::default(),
             buffers: &[],
         },
@@ -210,4 +247,92 @@ pub fn color_pass<'e>(
         })],
         ..Default::default()
     })
+}
+
+/// An offscreen HDR texture we render into and later sample from.
+pub struct HdrTarget {
+    pub view: wgpu::TextureView,
+    pub size: (u32, u32),
+}
+
+impl HdrTarget {
+    pub fn new(device: &wgpu::Device, label: &str, size: (u32, u32)) -> Self {
+        // New textures are zero-initialized by wgpu, so a fresh feedback
+        // buffer starts out black.
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: HDR_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        Self {
+            view: tex.create_view(&Default::default()),
+            size,
+        }
+    }
+}
+
+/// Bind group layout + linear clamp-to-edge sampler for "sample one
+/// texture" passes (group 1 in present.wgsl and the feedback shaders).
+pub struct Sampling {
+    pub layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+}
+
+impl Sampling {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("texture + sampler"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("linear clamp"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        Self { layout, sampler }
+    }
+
+    pub fn bind(&self, device: &wgpu::Device, view: &wgpu::TextureView) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("texture + sampler"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        })
+    }
 }

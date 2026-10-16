@@ -1,6 +1,6 @@
 //! The simplest scene: one fullscreen fragment shader (shaders/bass_pulse.wgsl).
 
-use super::{Scene, SceneCtx};
+use super::{Scene, SceneCtx, SceneInit};
 use crate::gpu::{self, HDR_FORMAT, shaders};
 
 pub struct BassPulse {
@@ -8,13 +8,13 @@ pub struct BassPulse {
 }
 
 impl BassPulse {
-    pub fn new(device: &wgpu::Device, audio_layout: &wgpu::BindGroupLayout) -> Self {
-        let module = shaders::compile(device, "bass_pulse", shaders::BASS_PULSE);
+    pub fn new(init: &SceneInit) -> Self {
+        let module = shaders::compile(init.device, "bass_pulse", shaders::BASS_PULSE);
         let pipeline = gpu::fullscreen_pipeline(
-            device,
+            init.device,
             "bass_pulse",
             &module,
-            &[audio_layout],
+            &[init.audio_layout],
             HDR_FORMAT,
             None,
         );

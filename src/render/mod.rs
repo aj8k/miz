@@ -2,8 +2,8 @@
 
 pub mod params;
 
-use crate::gpu::{self, Gpu, HDR_FORMAT, shaders};
-use crate::scenes::{Scene, SceneCtx, bass_pulse::BassPulse};
+use crate::gpu::{self, Gpu, HdrTarget, Sampling, shaders};
+use crate::scenes::{self, Scene, SceneCtx, SceneInit};
 use crate::snapshot::{MAX_BANDS, Snapshot, WAVE_LEN};
 use params::{FrameParams, Globals};
 
@@ -95,92 +95,36 @@ impl AudioBuffers {
     }
 }
 
-/// An offscreen texture we render into and later sample from.
-struct Target {
-    view: wgpu::TextureView,
-    size: (u32, u32),
-}
-
-impl Target {
-    fn new(device: &wgpu::Device, label: &str, size: (u32, u32)) -> Self {
-        let tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size: wgpu::Extent3d {
-                width: size.0,
-                height: size.1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: HDR_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        Self {
-            view: tex.create_view(&Default::default()),
-            size,
-        }
-    }
-}
-
 pub struct Renderer {
     audio: AudioBuffers,
     params: FrameParams,
     scene: Box<dyn Scene>,
-    scene_target: Target,
+    scene_target: HdrTarget,
     /// Internal resolution relative to the window (0.5..1.0).
     render_scale: f32,
 
-    sampler: wgpu::Sampler,
-    present_layout: wgpu::BindGroupLayout,
+    sampling: Sampling,
     present_group: wgpu::BindGroup,
     present_pipeline: wgpu::RenderPipeline,
     hud_pipeline: wgpu::RenderPipeline,
 }
 
 impl Renderer {
-    pub fn new(gpu: &Gpu) -> Self {
+    pub fn new(gpu: &Gpu, scene_name: &str) -> anyhow::Result<Self> {
         let device = &gpu.device;
         let audio = AudioBuffers::new(device);
         let render_scale = 1.0;
-        let scene_target = Target::new(device, "scene", scaled(gpu.size(), render_scale));
+        let scene_target = HdrTarget::new(device, "scene", scaled(gpu.size(), render_scale));
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("linear clamp"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-        let present_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("present"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let present_group = texture_group(device, &present_layout, &scene_target.view, &sampler);
+        let sampling = Sampling::new(device);
+        let present_group = sampling.bind(device, &scene_target.view);
 
         let module = shaders::compile(device, "present", shaders::PRESENT);
         let present_pipeline = gpu::fullscreen_pipeline(
             device,
             "present",
             &module,
-            &[&audio.layout, &present_layout],
+            &[&audio.layout, &sampling.layout],
             gpu.config.format,
             None,
         );
@@ -194,20 +138,25 @@ impl Renderer {
             Some(wgpu::BlendState::ALPHA_BLENDING),
         );
 
-        let scene = Box::new(BassPulse::new(device, &audio.layout));
+        let init = SceneInit {
+            device,
+            audio_layout: &audio.layout,
+            sampling: &sampling,
+            size: scene_target.size,
+        };
+        let scene = scenes::create(scene_name, &init)?;
 
-        Self {
+        Ok(Self {
             audio,
             params: FrameParams::new(),
             scene,
             scene_target,
             render_scale,
-            sampler,
-            present_layout,
+            sampling,
             present_group,
             present_pipeline,
             hud_pipeline,
-        }
+        })
     }
 
     pub fn scene_name(&self) -> &'static str {
@@ -220,13 +169,9 @@ impl Renderer {
         if size == self.scene_target.size {
             return;
         }
-        self.scene_target = Target::new(&gpu.device, "scene", size);
-        self.present_group = texture_group(
-            &gpu.device,
-            &self.present_layout,
-            &self.scene_target.view,
-            &self.sampler,
-        );
+        self.scene_target = HdrTarget::new(&gpu.device, "scene", size);
+        self.present_group = self.sampling.bind(&gpu.device, &self.scene_target.view);
+        self.scene.resize(&gpu.device, &self.sampling, size);
     }
 
     pub fn render(
@@ -293,26 +238,4 @@ fn scaled((w, h): (u32, u32), scale: f32) -> (u32, u32) {
         ((w as f32 * scale).round() as u32).max(1),
         ((h as f32 * scale).round() as u32).max(1),
     )
-}
-
-fn texture_group(
-    device: &wgpu::Device,
-    layout: &wgpu::BindGroupLayout,
-    view: &wgpu::TextureView,
-    sampler: &wgpu::Sampler,
-) -> wgpu::BindGroup {
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("texture"),
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(sampler),
-            },
-        ],
-    })
 }
