@@ -2,3 +2,8 @@
 .flatpak-builder/
 /packaging/flatpak/build/
 /packaging/flatpak/repo/
+# snapcraft pack --destructive-mode
+/parts/
+/stage/
+/prime/
+*.snap

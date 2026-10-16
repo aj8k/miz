@@ -49,6 +49,12 @@ The app ID (desktop file, icon, AppStream metainfo, Wayland app_id) is
   The only audio permission is the PipeWire socket
   (`xdg-run/pipewire-0`, read-only); the config lives in
   `~/.var/app/com.antonjoy.miz/config/miz/`.
+- **Snap** — `snap/snapcraft.yaml` (core26, GPU from `mesa-2604`,
+  `pw-record` from Ubuntu's `pipewire-bin`). `snapcraft pack` builds it in
+  LXD (or `--destructive-mode` on Ubuntu 26.04). The only audio interface
+  is `pipewire`, which isn't auto-connected without a store grant:
+  `sudo snap connect miz:pipewire`. The config lives in
+  `~/snap/miz/current/.config/miz/`.
 
 ## Usage
 

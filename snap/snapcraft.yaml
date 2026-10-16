@@ -1,0 +1,96 @@
+name: miz
+base: core26
+adopt-info: miz
+grade: stable
+confinement: strict
+license: MIT
+platforms:
+  amd64:
+
+apps:
+  miz:
+    command: bin/miz
+    command-chain:
+      - bin/gpu-2604-wrapper
+      - bin/miz-snap-env
+    common-id: com.antonjoy.miz
+    desktop: usr/share/applications/com.antonjoy.miz.desktop
+    plugs:
+      - wayland
+      - x11
+      - opengl
+      - desktop
+      # PipeWire's native socket, for pw-record (not auto-connected without a
+      # store grant: `snap connect miz:pipewire`). miz records only the
+      # monitor of the default output (stream.capture.sink=true), never a
+      # microphone, and plays nothing: no audio-record, no audio-playback.
+      - pipewire
+
+plugs:
+  gpu-2604:
+    interface: content
+    target: $SNAP/gpu-2604
+    default-provider: mesa-2604
+
+layout:
+  /usr/share/libdrm:
+    bind: $SNAP/gpu-2604/libdrm
+  /usr/share/drirc.d:
+    symlink: $SNAP/gpu-2604/drirc.d
+
+parts:
+  miz:
+    plugin: rust
+    source: .
+    override-build: |
+      craftctl default
+      craftctl set version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+      install -Dm644 assets/com.antonjoy.miz.desktop -t $CRAFT_PART_INSTALL/usr/share/applications/
+      sed -i 's|^Icon=.*|Icon=${SNAP}/usr/share/icons/hicolor/scalable/apps/com.antonjoy.miz.svg|' \
+        $CRAFT_PART_INSTALL/usr/share/applications/com.antonjoy.miz.desktop
+      install -Dm644 assets/com.antonjoy.miz.svg -t $CRAFT_PART_INSTALL/usr/share/icons/hicolor/scalable/apps/
+      install -Dm644 assets/com.antonjoy.miz.metainfo.xml -t $CRAFT_PART_INSTALL/usr/share/metainfo/
+    parse-info: [usr/share/metainfo/com.antonjoy.miz.metainfo.xml]
+    stage-packages:
+      # pw-record and the client side of libpipewire (modules, SPA plugins,
+      # client.conf).
+      - pipewire-bin
+      # Loaded at runtime by winit (Wayland, X11) and wgpu (Vulkan, EGL).
+      - libvulkan1
+      - libegl1
+      - libwayland-client0
+      - libwayland-egl1
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+      - libx11-6
+      - libx11-xcb1
+      - libxcursor1
+      - libxi6
+      - libxrandr2
+    prime:
+      # pw-record only; not the PipeWire daemon, its session tools or docs.
+      - -usr/bin/pipewire*
+      - -usr/bin/pw-[!rc]*
+      - -usr/bin/pw-cli
+      - -usr/bin/pw-config
+      - -usr/bin/pw-container
+      - -usr/bin/pw-reserve
+      - -usr/share/doc
+      - -usr/share/man
+      - -usr/lib/systemd
+
+  launcher:
+    plugin: dump
+    source: snap/local
+    organize:
+      miz-snap-env: bin/miz-snap-env
+
+  gpu-2604:
+    after: [miz]
+    source: https://github.com/canonical/gpu-snap.git
+    plugin: dump
+    override-prime: |
+      craftctl default
+      ${CRAFT_PART_SRC}/bin/gpu-2604-cleanup mesa-2604
+    prime:
+      - bin/gpu-2604-wrapper
