@@ -41,9 +41,12 @@ pub struct Globals {
 }
 
 /// Audio data arrives in bursts (one PipeWire quantum ≈ 21 ms), so a 60 FPS
-/// render would see values jump every second or third frame. A light extra
-/// smoothing at frame rate turns those steps into continuous motion.
-const FRAME_SMOOTHING_S: f32 = 0.045;
+/// render would see values jump every second or third frame. Extra
+/// smoothing at frame rate turns those steps into continuous motion; its
+/// time constant is also the main "feel" difference between the modes:
+/// energetic reacts crisply, calm lazily.
+const SMOOTHING_ENERGETIC_S: f32 = 0.03;
+const SMOOTHING_CALM_S: f32 = 0.15;
 /// The "slow" features: for things that should drift with the music's
 /// overall energy (zoom, brightness, detail) rather than follow each hit.
 const SLOW: AttackRelease = AttackRelease::new(0.5, 1.5);
@@ -56,7 +59,12 @@ const WAVE_MIN_INTERVAL_S: f32 = 0.45;
 
 pub struct FrameParams {
     pub globals: Globals,
+    /// Band levels as uploaded to the GPU (smoothed, then shaped).
     pub bands: [f32; MAX_BANDS],
+    /// Frame-smoothed features before mode shaping: bass, low-mid,
+    /// high-mid, treble, loudness; and bands.
+    features: [f32; 5],
+    smooth_bands: [f32; MAX_BANDS],
     /// f64: an f32 accumulator would lose precision after hours of running.
     energy_time: f64,
     last_beat_count: u32,
@@ -79,6 +87,8 @@ impl FrameParams {
                 ..Globals::default()
             },
             bands: [0.0; MAX_BANDS],
+            features: [0.0; 5],
+            smooth_bands: [0.0; MAX_BANDS],
             energy_time: 0.0,
             last_beat_count: 0,
             beat: 0.0,
@@ -108,28 +118,44 @@ impl FrameParams {
     }
 
     pub fn update(&mut self, snap: &Snapshot, time: f64, dt: f32, resolution: (u32, u32)) {
-        let a = one_pole_alpha(dt, FRAME_SMOOTHING_S);
         let g = &mut self.globals;
-        let lerp = |cur: &mut f32, target: f32| *cur += (target - *cur) * a;
-        lerp(&mut g.bass, snap.bass);
-        lerp(&mut g.low_mid, snap.low_mid);
-        lerp(&mut g.high_mid, snap.high_mid);
-        lerp(&mut g.treble, snap.treble);
-        lerp(&mut g.loudness, snap.loudness);
-        lerp(&mut g.width, snap.width);
-        lerp(&mut g.idle, snap.idle);
-        // Calm mode fades in and out over a couple of seconds: switching it
-        // must not itself cause a sudden change.
+        // Calm mode fades in and out over about a second: switching it must
+        // not itself cause a sudden change.
         g.calm += (self.calm_target - g.calm) * one_pole_alpha(dt, CALM_FADE_S);
         let calm = g.calm;
 
-        // The beat pulse should rise a little quicker than everything else;
-        // calm mode softens it for every scene.
-        self.beat += (snap.beat - self.beat) * one_pole_alpha(dt, 0.02);
-        g.beat = self.beat * (1.0 - 0.4 * calm);
-        for (b, &s) in self.bands.iter_mut().zip(snap.bands()) {
+        let tau = SMOOTHING_ENERGETIC_S + (SMOOTHING_CALM_S - SMOOTHING_ENERGETIC_S) * calm;
+        let a = one_pole_alpha(dt, tau);
+        let targets = [
+            snap.bass,
+            snap.low_mid,
+            snap.high_mid,
+            snap.treble,
+            snap.loudness,
+        ];
+        for (f, t) in self.features.iter_mut().zip(targets) {
+            *f += (t - *f) * a;
+        }
+        for (b, &s) in self.smooth_bands.iter_mut().zip(snap.bands()) {
             *b += (s - *b) * a;
         }
+        // Mode shaping: energetic stretches levels away from the middle
+        // (quiet quieter, loud louder: hits stand out), calm squeezes them
+        // towards it (everything gentler).
+        let contrast = 1.4 + (0.7 - 1.4) * calm;
+        let shape = |v: f32| (0.4 + (v - 0.4) * contrast).clamp(0.0, 1.0);
+        [g.bass, g.low_mid, g.high_mid, g.treble, g.loudness] = self.features.map(shape);
+        for (out, &b) in self.bands.iter_mut().zip(&self.smooth_bands) {
+            *out = shape(b);
+        }
+        let a_fixed = one_pole_alpha(dt, 0.045);
+        g.width += (snap.width - g.width) * a_fixed;
+        g.idle += (snap.idle - g.idle) * a_fixed;
+
+        // The beat pulse rises a little quicker than everything else; calm
+        // mode halves it for every scene.
+        self.beat += (snap.beat - self.beat) * one_pole_alpha(dt, 0.02);
+        g.beat = self.beat * (1.0 - 0.5 * calm);
         g.bass_slow = SLOW.step(g.bass_slow, snap.bass, dt);
         g.treble_slow = SLOW.step(g.treble_slow, snap.treble, dt);
         g.loudness_slow = SLOW.step(g.loudness_slow, snap.loudness, dt);
@@ -151,8 +177,8 @@ impl FrameParams {
         // drift instead of stopping.
         let speed = 0.35 + 1.1 * g.loudness;
         let speed = speed + (0.2 - speed) * g.idle;
-        // Calm mode: everything moves at ~2/3 speed.
-        let speed = speed * (1.0 - 0.35 * calm);
+        // Mode: energetic runs 1.3x, calm 0.55x.
+        let speed = speed * (1.3 + (0.55 - 1.3) * calm);
         self.energy_time += f64::from(dt * speed);
 
         g.resolution = [resolution.0 as f32, resolution.1 as f32];

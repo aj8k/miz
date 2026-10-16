@@ -85,6 +85,6 @@ fn fs_main(in: WaveOut) -> @location(0) vec4<f32> {
                       vec3<f32>(0.55), vec3<f32>(0.45),
                       vec3<f32>(1.0), vec3<f32>(0.0, 0.33, 0.67));
     let level = mix(0.10 + 0.18 * g.loudness, 0.12, g.idle) + 0.04 * g.beat;
-    let intensity = level * mix(1.0, 0.8, g.calm);
+    let intensity = level * mix(1.7, 0.8, g.calm);
     return vec4<f32>(hue * intensity * edge, 1.0);
 }

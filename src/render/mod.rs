@@ -309,6 +309,7 @@ impl Renderer {
         let ctx = SceneCtx {
             audio_group: &self.audio.group,
             dt,
+            calm: self.params.globals.calm,
         };
         self.p
             .scenes

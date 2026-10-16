@@ -77,7 +77,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Decay: exponential fade with a time constant in seconds. Calm mode
     // keeps trails longer. Rgba16Float makes this smooth — in 8-bit, slow
     // fades get stuck on the last few steps and leave "burnt-in" pixels.
-    let decay_tau = mix(0.45, 0.7, calm);
+    let decay_tau = mix(0.55, 0.7, calm);
     c *= exp(-dt / decay_tau);
 
     // Colour drift: hues rotate slowly as trails age, so a tunnel shows a

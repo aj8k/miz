@@ -10,8 +10,8 @@ use crate::gpu::{self, ADDITIVE, HDR_FORMAT, HdrTarget, Sampling};
 
 /// Must match SEGMENTS in lissajous_line.wgsl: 6 vertices per segment.
 const SEGMENTS: u32 = 1023;
-/// Phosphor time constant, seconds.
-const PERSISTENCE_S: f32 = 0.35;
+/// Phosphor time constants, seconds: energetic / calm.
+const PERSISTENCE_S: (f32, f32) = (0.22, 0.55);
 
 /// Blend state that computes `dst * constant`: the fragment's own colour
 /// is multiplied by zero, the existing pixel by the blend constant.
@@ -102,7 +102,9 @@ impl Scene for Lissajous {
         {
             let mut pass = gpu::color_pass(encoder, "phosphor", &self.phosphor.view, clear);
             pass.set_bind_group(0, ctx.audio_group, &[]);
-            let k = f64::from((-ctx.dt / PERSISTENCE_S).exp());
+            let (fast, slow) = PERSISTENCE_S;
+            let persistence = fast + (slow - fast) * ctx.calm;
+            let k = f64::from((-ctx.dt / persistence).exp());
             pass.set_blend_constant(wgpu::Color {
                 r: k,
                 g: k,

@@ -29,6 +29,8 @@ pub struct SceneCtx<'a> {
     pub audio_group: &'a wgpu::BindGroup,
     /// Frame delta in seconds (also in the globals, for CPU-side use).
     pub dt: f32,
+    /// Calm-mode amount 0..1 (as `g.calm` in the shaders).
+    pub calm: f32,
 }
 
 pub trait Scene {

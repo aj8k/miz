@@ -31,12 +31,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Safety limiter (luma.wgsl): keeps the average brightness from
     // changing faster than the allowed rate.
     hdr *= lim.exposure;
-    // Calm grading: a little less saturated, a little dimmer, and a lower
-    // brightness ceiling.
+    // Mode grading. Energetic: a bit more saturated and brighter than the
+    // scenes' own colours. Calm: muted, dimmer, with a lower ceiling.
     let calm = g.calm;
-    hdr = mix(vec3<f32>(dot(hdr, LUMA)), hdr, 1.0 - 0.2 * calm);
-    hdr *= 1.0 - 0.15 * calm;
-    let mapped = tonemap(hdr, mix(0.6, 0.5, calm), mix(1.0, 0.85, calm));
+    hdr = mix(vec3<f32>(dot(hdr, LUMA)), hdr, mix(1.2, 0.75, calm));
+    hdr = max(hdr, vec3<f32>(0.0)); // oversaturation can push channels below 0
+    hdr *= mix(1.1, 0.8, calm);
+    let mapped = tonemap(hdr, mix(0.6, 0.45, calm), mix(1.0, 0.8, calm));
     var c = linear_to_srgb(clamp(mapped, vec3<f32>(0.0), vec3<f32>(1.0)));
     // Triangular-PDF dither (difference of two uniform noises), ±1 LSB.
     let n = hash12(in.pos.xy + f32(g.frame % 64u) * 17.0)

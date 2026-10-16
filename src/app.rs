@@ -10,6 +10,8 @@ use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::platform::wayland::WindowAttributesExtWayland;
+use winit::platform::x11::WindowAttributesExtX11;
 use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::audio::{AudioEngine, AudioStatus};
@@ -91,6 +93,9 @@ struct State {
     /// See `frame_interval`.
     target_fps: f64,
     frame_interval: Duration,
+    /// False until the compositor tells us the monitor's refresh rate
+    /// (on Wayland that's a moment after the window appears).
+    refresh_known: bool,
     /// Shader directory in dev mode (None = shaders built into the binary).
     shader_dir: Option<PathBuf>,
     watcher: Option<Watcher>,
@@ -111,6 +116,10 @@ impl State {
             .with_title("miz")
             .with_inner_size(LogicalSize::new(1280.0, 720.0))
             .with_min_inner_size(LogicalSize::new(320.0, 200.0));
+        // Wayland app_id / X11 WM_CLASS "miz": lets the desktop match the
+        // window to miz.desktop (dock icon, grouping).
+        let attrs = WindowAttributesExtWayland::with_name(attrs, "miz", "miz");
+        let attrs = WindowAttributesExtX11::with_name(attrs, "miz", "miz");
         let window = Arc::new(
             event_loop
                 .create_window(attrs)
@@ -148,8 +157,7 @@ impl State {
 
         let now = Instant::now();
         let target_fps = f64::from(cfg.visual.target_fps);
-        let interval = frame_interval(&window, target_fps);
-        log::info!("frame interval {:.2} ms", interval.as_secs_f64() * 1e3);
+        let (interval, refresh_known) = frame_interval(&window, target_fps);
         Ok(Self {
             window,
             gpu,
@@ -171,6 +179,7 @@ impl State {
             finished: None,
             target_fps,
             frame_interval: interval,
+            refresh_known,
             shader_dir,
             watcher,
             next_frame: now,
@@ -199,23 +208,42 @@ impl State {
             self.fps_frames += 1;
         }
 
+        if !self.refresh_known {
+            self.update_frame_interval();
+        }
+        // Long silence: the idle animation is slow, so half the frame rate
+        // looks the same and saves power while nothing is playing.
+        let interval = if self.snap.idle > 0.98 {
+            self.frame_interval * 2
+        } else {
+            self.frame_interval
+        };
         self.redraw_pending = false;
-        self.next_frame += self.frame_interval;
+        self.next_frame += interval;
         if self.next_frame < now {
             // Fell behind (stall, suspend): restart the timeline instead of
             // rendering a burst of catch-up frames.
-            self.next_frame = now + self.frame_interval;
+            self.next_frame = now + interval;
         }
 
         let elapsed = self.fps_window_start.elapsed();
         if elapsed >= Duration::from_secs(1) {
             // Cheap, and catches the window moving to another monitor.
-            self.frame_interval = frame_interval(&self.window, self.target_fps);
+            self.update_frame_interval();
             let fps = self.fps_frames as f32 / elapsed.as_secs_f32();
             self.update_title(fps, &engine.status());
             self.fps_frames = 0;
             self.fps_window_start = Instant::now();
         }
+    }
+
+    fn update_frame_interval(&mut self) {
+        let (interval, known) = frame_interval(&self.window, self.target_fps);
+        if known && !self.refresh_known {
+            log::info!("frame interval {:.2} ms", interval.as_secs_f64() * 1e3);
+        }
+        self.frame_interval = interval;
+        self.refresh_known = known;
     }
 
     fn capture_if_due(&mut self, texture: &wgpu::Texture, now: Instant) {
@@ -279,7 +307,7 @@ impl State {
                         Ok(cfg) => {
                             self.renderer.apply_config(&self.gpu, &cfg);
                             self.target_fps = f64::from(cfg.visual.target_fps);
-                            self.frame_interval = frame_interval(&self.window, self.target_fps);
+                            self.update_frame_interval();
                             // A --source flag keeps priority over the file.
                             let source = app
                                 .source_override
@@ -455,11 +483,14 @@ impl ApplicationHandler for App {
 /// -> 72 fps, 120 -> 60, 60 -> 60): every frame then stays on screen for
 /// the same number of refreshes, so motion is even, while the GPU/CPU do a
 /// fraction of the work of running at the full refresh rate.
-fn frame_interval(window: &Window, target_fps: f64) -> Duration {
+///
+/// Returns the interval and whether the refresh rate was actually known.
+fn frame_interval(window: &Window, target_fps: f64) -> (Duration, bool) {
     let refresh = window
         .current_monitor()
         .and_then(|m| m.refresh_rate_millihertz())
-        .map_or(target_fps, |mhz| f64::from(mhz) / 1000.0);
-    let divisor = (refresh / target_fps).round().max(1.0);
-    Duration::from_secs_f64(divisor / refresh)
+        .map(|mhz| f64::from(mhz) / 1000.0);
+    let hz = refresh.unwrap_or(target_fps);
+    let divisor = (hz / target_fps).round().max(1.0);
+    (Duration::from_secs_f64(divisor / hz), refresh.is_some())
 }

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- miz icon: a calm tunnel of rings, like the feedback scene. -->
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0" stop-color="#2a1640"/>
+      <stop offset="1" stop-color="#07060d"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7fd6e8"/>
+      <stop offset="0.5" stop-color="#b57ce8"/>
+      <stop offset="1" stop-color="#e86fa8"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#bg)"/>
+  <g fill="none" stroke="url(#ring)" filter="url(#glow)">
+    <circle cx="64" cy="64" r="46" stroke-width="1.5" opacity="0.25"/>
+    <circle cx="64" cy="64" r="37" stroke-width="2" opacity="0.4"/>
+    <circle cx="64" cy="64" r="29" stroke-width="2.5" opacity="0.6"/>
+    <path d="M64 42 C 70 43, 74 47, 79 46 S 86 55, 85 60 S 89 70, 84 74 S 78 84, 72 84
+             S 62 88, 57 85 S 46 82, 44 76 S 39 66, 43 61 S 44 50, 50 47 S 58 41, 64 42 Z"
+          stroke-width="3"/>
+  </g>
+  <circle cx="64" cy="64" r="9" fill="#b57ce8" opacity="0.25" filter="url(#glow)"/>
+</svg>
