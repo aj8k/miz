@@ -1,0 +1,20 @@
+[package]
+name = "miz"
+version = "0.1.0"
+edition = "2024"
+description = "A calm, native music visualizer for PipeWire"
+license = "MIT"
+
+[dependencies]
+# Error type with context for startup / top-level failures.
+anyhow = "1"
+# FFT for the spectrum analysis (pure Rust, SIMD-accelerated).
+rustfft = "6.4"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# The DSP runs per audio hop; keep it fast even in debug builds.
+[profile.dev.package."*"]
+opt-level = 2
