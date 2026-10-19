@@ -77,6 +77,9 @@ const BASS: (f32, f32) = (30.0, 150.0);
 const LOW_MID: (f32, f32) = (150.0, 600.0);
 const HIGH_MID: (f32, f32) = (600.0, 3000.0);
 const TREBLE: (f32, f32) = (3000.0, 16000.0);
+/// A band counts as "sounding" for `complexity` within this many dB of the
+/// loudest band.
+const COMPLEXITY_DB: f32 = 15.0;
 
 pub struct Analyzer {
     cfg: AnalyzerConfig,
@@ -290,6 +293,18 @@ impl Analyzer {
             .fold(f32::NEG_INFINITY, f32::max);
         self.gain.update(peak_db, dt, silent_now);
         let range = self.cfg.range_db;
+        // Complexity: share of the spectrum that is sounding. A lone synth
+        // line lights up a few bands (its harmonics); a full mix most.
+        let complexity_now = if silent_now {
+            0.0
+        } else {
+            let sounding = self
+                .band_db
+                .iter()
+                .filter(|&&db| db >= peak_db - COMPLEXITY_DB)
+                .count();
+            sounding as f32 / self.band_db.len() as f32
+        };
         for (norm, &db) in self.band_norm.iter_mut().zip(&self.band_db) {
             *norm = self.gain.normalize(db, range);
         }
@@ -324,6 +339,7 @@ impl Analyzer {
         snap.loudness = fs.step(snap.loudness, mean(&(0..self.band_norm.len())), dt);
         // Width is a slow, "spatial" quantity: smooth it heavily.
         snap.width += (width_now - snap.width) * one_pole_alpha(dt, 0.5);
+        snap.complexity += (complexity_now - snap.complexity) * one_pole_alpha(dt, 0.4);
 
         snap.beat *= (-dt / self.cfg.beat_decay_s).exp();
         if let Some(strength) = onset {

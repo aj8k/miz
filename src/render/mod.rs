@@ -309,7 +309,9 @@ impl Renderer {
 
         // 2. Scene into the HDR target.
         let ctx = SceneCtx {
+            queue,
             audio_group: &self.audio.group,
+            globals: &self.params.globals,
             dt,
             calm: self.params.globals.calm,
         };

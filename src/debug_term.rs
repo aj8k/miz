@@ -66,6 +66,7 @@ fn dashboard(s: &mut String, snap: &Snapshot, status: &str, rate: f32) -> std::f
         ("treble", snap.treble),
         ("loudness", snap.loudness),
         ("width", snap.width),
+        ("complex", snap.complexity),
         ("idle", snap.idle),
     ] {
         writeln!(s, "{name:>9} {} {v:4.2}\x1b[K", meter(v, 40))?;

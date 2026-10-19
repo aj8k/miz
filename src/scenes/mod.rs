@@ -9,6 +9,7 @@ use anyhow::bail;
 
 use crate::gpu::Sampling;
 use crate::gpu::shaders::{Shader, ShaderLib};
+use crate::render::params::Globals;
 use shader::ShaderScene;
 
 /// Everything a scene needs to build its GPU resources.
@@ -25,8 +26,11 @@ pub struct SceneInit<'a> {
 
 /// What a scene gets each frame.
 pub struct SceneCtx<'a> {
+    pub queue: &'a wgpu::Queue,
     /// Group 0 of every pipeline: globals, bands, waveform (common.wgsl).
     pub audio_group: &'a wgpu::BindGroup,
+    /// This frame's globals, for CPU-side decisions.
+    pub globals: &'a Globals,
     /// Frame delta in seconds (also in the globals, for CPU-side use).
     pub dt: f32,
     /// Calm-mode amount 0..1 (as `g.calm` in the shaders).

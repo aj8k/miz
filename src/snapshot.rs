@@ -31,6 +31,9 @@ pub struct Snapshot {
     pub loudness: f32,
     /// 0 = mono, ~0.5 = wide, 1 = fully out of phase.
     pub width: f32,
+    /// Share of the spectrum that is sounding: 0 = one pure tone .. 1 = a
+    /// dense mix with every band busy.
+    pub complexity: f32,
 
     /// Beat pulse: jumps up on an onset, then decays smoothly towards 0.
     pub beat: f32,
@@ -64,6 +67,7 @@ impl Default for Snapshot {
             treble: 0.0,
             loudness: 0.0,
             width: 0.0,
+            complexity: 0.0,
             beat: 0.0,
             beat_count: 0,
             idle: 1.0,

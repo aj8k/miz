@@ -29,7 +29,8 @@ struct Globals {
     loudness_slow: f32,
     // Safety limiter: max change of mean brightness per second (luma.wgsl).
     safety_rate: f32,
-    _pad: f32,
+    // Share of the spectrum that is sounding: 0 = one tone .. 1 = dense mix.
+    complexity: f32,
     // Two most recent "light waves" (started by strong beats, at most ~2/s):
     // (age0 seconds, strength0, age1, strength1). Age is huge when unused.
     waves: vec4<f32>,

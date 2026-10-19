@@ -4,13 +4,26 @@
 // Axes are rotated 45° into mid/side: up = mid (L+R), right = side (R-L).
 // So mono shows as a vertical line, wide stereo as a fat cloud, and
 // out-of-phase content lies flat — exactly like a studio goniometer.
+//
+// Colour follows the music: calm, quiet music draws in nearly one soft
+// tint; the louder, faster and busier it gets, the more saturated the beam
+// and the more hues it spans from the core to the rim. Beats push the
+// colour up for a moment, and strong ones send a ring of it outwards.
 
 const SEGMENTS: u32 = 1023u;
+
+struct Colour {
+    intensity: f32,  // 0 = calm and sparse .. 1 = loud, fast and busy
+    hue: f32,        // position on the colour wheel, turns faster when intense
+};
+@group(1) @binding(0) var<uniform> colour: Colour;
 
 struct LineOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) across: f32,
     @location(1) intensity: f32,
+    // Distance from the centre, in window heights.
+    @location(2) radius: f32,
 };
 
 // Stereo sample, gently low-passed (triangular window over ±6 samples,
@@ -66,16 +79,42 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> LineOut {
     // stops the many tiny segments near silence from piling up into a
     // blinding spot in the centre.
     o.intensity = clamp(0.0025 / (len + 0.0015), 0.10, 0.35);
+    o.radius = length(a);
     return o;
+}
+
+// Full-spectrum palette (Inigo Quilez's rainbow).
+fn rainbow(t: f32) -> vec3<f32> {
+    return palette(t, vec3<f32>(0.5), vec3<f32>(0.5), vec3<f32>(1.0),
+                   vec3<f32>(0.0, 0.33, 0.67));
 }
 
 @fragment
 fn fs_main(in: LineOut) -> @location(0) vec4<f32> {
     let edge = 1.0 - smoothstep(0.2, 1.0, abs(in.across));
-    // Phosphor colour drifting slowly between green, teal and amber.
-    let hue = palette(g.energy_time * 0.015 + 0.35,
-                      vec3<f32>(0.5, 0.6, 0.5), vec3<f32>(0.35, 0.3, 0.3),
-                      vec3<f32>(1.0), vec3<f32>(0.0, 0.25, 0.5));
+    // Rhythm: each beat pushes the colour up for a moment on top of the
+    // music's intensity.
+    let c = clamp(colour.intensity + 0.5 * g.beat, 0.0, 1.0);
+    // Colour is laid out by distance from the centre — rings from core to
+    // rim — not along the beam: each frame's beam lands in different
+    // places, and colours tied to the beam would average to grey in the
+    // phosphor. The more intense, the more hues the rings span.
+    let r = in.radius;
+    var t = colour.hue + r * (0.1 + 1.6 * c);
+    // Strong beats ("light waves") shift the hue in a ring that travels
+    // outwards and fades.
+    for (var w = 0; w < 2; w++) {
+        let age = g.waves[w * 2];
+        let strength = g.waves[w * 2 + 1];
+        let front = (r - age * 0.5) / 0.06;
+        t += 0.18 * strength * exp(-front * front) * exp(-age * 1.5);
+    }
+    let vivid = rainbow(t);
+    // Saturation: a soft, almost white tint when calm, full colour when
+    // intense. Mixing towards the colour's own luminance keeps brightness
+    // steady, so colour changes never read as flashes.
+    let luma = dot(vivid, vec3<f32>(0.299, 0.587, 0.114));
+    let hue = mix(vec3<f32>(luma), vivid, 0.08 + 0.92 * c);
     let level = mix(0.10 + 0.10 * g.loudness, 0.10, g.idle);
     return vec4<f32>(hue * level * in.intensity * edge, 1.0);
 }

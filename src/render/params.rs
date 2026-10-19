@@ -34,7 +34,8 @@ pub struct Globals {
     pub treble_slow: f32,
     pub loudness_slow: f32,
     pub safety_rate: f32,
-    pub _pad: f32,
+    /// Share of the spectrum that is sounding, 0..1 (see `Snapshot`).
+    pub complexity: f32,
     /// Two most recent "light waves" (strong beats): age in seconds and
     /// strength, as (age0, strength0, age1, strength1).
     pub waves: [f32; 4],
@@ -144,6 +145,7 @@ impl FrameParams {
         }
         let a_fixed = one_pole_alpha(dt, 0.045);
         g.width += (snap.width - g.width) * a_fixed;
+        g.complexity += (snap.complexity - g.complexity) * a_fixed;
         g.idle += (snap.idle - g.idle) * a_fixed;
 
         // The beat pulse rises a little quicker than everything else; calm
